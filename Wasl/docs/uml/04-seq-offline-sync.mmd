@@ -1,0 +1,24 @@
+sequenceDiagram
+  autonumber
+  actor S as Student
+  participant M as Mobile app
+  participant L as Local SQLite
+  participant API as Backend API
+  participant DB as PostgreSQL
+  S->>M: Download lesson pack (online)
+  M->>API: GET /sync/pull?since=t0
+  API->>DB: Changed lessons, resources, practice
+  API-->>M: Changes + new cursor t1
+  M->>L: Store content and cursor
+  Note over S,L: Connection lost
+  S->>M: Answer practice and submit work
+  M->>L: Save to outbox with client IDs
+  Note over S,L: Connection back
+  M->>API: POST /sync/push (outbox operations)
+  loop each operation
+    API->>DB: Skip if client ID already applied, else apply
+  end
+  API-->>M: Accepted and rejected IDs
+  M->>L: Clear accepted operations
+  M->>API: GET /sync/pull?since=t1
+  API-->>M: New grades and content

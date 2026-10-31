@@ -1,0 +1,166 @@
+classDiagram
+  direction LR
+  class School {
+    +UUID id
+    +String name
+    +String locale
+    +Boolean active
+  }
+  class User {
+    +UUID id
+    +String email
+    +String fullName
+    +String passwordHash
+    +String preferredLanguage
+  }
+  class Membership {
+    +UUID id
+    +Role role
+    +Boolean active
+  }
+  class Role {
+    <<enumeration>>
+    PLATFORM_ADMIN
+    SCHOOL_ADMIN
+    TEACHER
+    STUDENT
+    PARENT
+  }
+  class ParentStudentLink {
+    +UUID id
+    +LinkStatus status
+    +DateTime verifiedAt
+  }
+  class AcademicYear {
+    +UUID id
+    +String name
+    +Date startDate
+    +Date endDate
+  }
+  class Semester {
+    +UUID id
+    +String name
+  }
+  class Grade {
+    +UUID id
+    +String name
+    +Int level
+  }
+  class Section {
+    +UUID id
+    +String name
+  }
+  class Subject {
+    +UUID id
+    +String nameAr
+    +String nameEn
+  }
+  class SectionSubject {
+    +UUID id
+  }
+  class Enrollment {
+    +UUID id
+    +EnrollmentStatus status
+  }
+  class Unit {
+    +UUID id
+    +String title
+    +Int order
+  }
+  class Lesson {
+    +UUID id
+    +String title
+    +LessonStatus status
+    +publish()
+  }
+  class Resource {
+    +UUID id
+    +ResourceType type
+    +String storageKey
+    +Boolean offlineAllowed
+  }
+  class Assessment {
+    +UUID id
+    +AssessmentType type
+    +DateTime opensAt
+    +DateTime dueAt
+    +AssessmentStatus status
+    +publish()
+    +releaseResults()
+  }
+  class Question {
+    +UUID id
+    +QuestionType type
+    +String text
+    +Float points
+  }
+  class Skill {
+    +UUID id
+    +String name
+  }
+  class Submission {
+    +UUID id
+    +DateTime submittedAt
+    +SubmissionStatus status
+    +Float score
+    +grade()
+  }
+  class Answer {
+    +UUID id
+    +Json response
+    +Float score
+  }
+  class StudentSkillScore {
+    +Float score
+    +MasteryLevel level
+    +recalculate()
+  }
+  class CatchUpPlan {
+    +UUID id
+    +Date deadline
+    +PlanStatus status
+    +generate()
+  }
+  class SupportAlert {
+    +UUID id
+    +AlertReason reason
+    +AlertStatus status
+  }
+  class AttendanceRecord {
+    +Date date
+    +AttendanceStatus status
+  }
+
+  School "1" --> "*" Membership
+  User "1" --> "*" Membership
+  Membership --> Role
+  User "1" --> "*" ParentStudentLink : parent
+  User "1" --> "*" ParentStudentLink : child
+  School "1" *-- "*" AcademicYear
+  AcademicYear "1" *-- "*" Semester
+  School "1" *-- "*" Grade
+  Grade "1" *-- "*" Section
+  AcademicYear "1" --> "*" Section
+  School "1" *-- "*" Subject
+  Section "1" *-- "*" SectionSubject
+  Subject "1" --> "*" SectionSubject
+  User "1" --> "*" SectionSubject : teaches
+  User "1" --> "*" Enrollment : student
+  Section "1" --> "*" Enrollment
+  SectionSubject "1" *-- "*" Unit
+  Unit "1" *-- "*" Lesson
+  Lesson "1" o-- "*" Resource
+  SectionSubject "1" *-- "*" Assessment
+  Assessment "*" o-- "*" Question
+  Question "*" --> "*" Skill : tests
+  Skill "*" --> "*" Skill : prerequisite
+  Assessment "1" *-- "*" Submission
+  User "1" --> "*" Submission : student
+  Submission "1" *-- "*" Answer
+  Answer "*" --> "1" Question
+  User "1" --> "*" StudentSkillScore
+  Skill "1" --> "*" StudentSkillScore
+  User "1" --> "*" CatchUpPlan
+  User "1" --> "*" SupportAlert
+  User "1" --> "*" AttendanceRecord
+  Section "1" --> "*" AttendanceRecord

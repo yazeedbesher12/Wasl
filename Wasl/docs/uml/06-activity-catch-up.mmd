@@ -1,0 +1,16 @@
+flowchart TD
+  A([Student misses lessons or tasks]) --> B[System lists missed lessons and tasks]
+  B --> C[Order items by skill prerequisites]
+  C --> D[Read student's available days and teacher deadline]
+  D --> E[Spread items across available days]
+  E --> F{Fits before deadline?}
+  F -- No --> G[Flag plan for teacher with overload warning]
+  F -- Yes --> H[Draft plan sent to teacher]
+  G --> H
+  H --> I{Teacher approves?}
+  I -- Edit --> J[Teacher changes items or deadline] --> E
+  I -- Yes --> K[Plan published to student and parent]
+  K --> L[Student completes items]
+  L --> M{All items done?}
+  M -- No, item overdue --> N[Support alert raised] --> L
+  M -- Yes --> O([Plan completed, skill map updated])

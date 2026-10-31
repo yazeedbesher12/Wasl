@@ -1,0 +1,20 @@
+sequenceDiagram
+  autonumber
+  actor S as Student
+  participant C as Web or mobile app
+  participant API as Backend API
+  participant AI as AI service
+  participant V as pgvector
+  participant LLM as LLM provider
+  S->>C: Ask question about a lesson
+  C->>API: POST /ai/tutor/ask
+  API->>API: Check role and enrolled subjects
+  API->>AI: Question + school ID + subject IDs
+  AI->>V: Search approved chunks in those subjects
+  V-->>AI: Top matching chunks with lesson links
+  AI->>LLM: Prompt with chunks, hint-only rules
+  LLM-->>AI: Answer
+  AI-->>API: Answer + source links
+  API->>API: Log usage for the school
+  API-->>C: Answer with sources
+  C-->>S: Show explanation and links

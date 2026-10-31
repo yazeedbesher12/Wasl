@@ -1,0 +1,11 @@
+stateDiagram-v2
+  [*] --> Draft
+  Draft --> Scheduled: publish with future open date
+  Draft --> Open: publish now
+  Scheduled --> Open: open date reached
+  Open --> Closed: due date reached
+  Open --> Draft: unpublish (no submissions yet)
+  Closed --> Grading: teacher starts grading
+  Grading --> ResultsReleased: release results
+  ResultsReleased --> Archived: academic year ends
+  Archived --> [*]

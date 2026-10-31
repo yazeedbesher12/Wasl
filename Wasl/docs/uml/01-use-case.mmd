@@ -1,0 +1,48 @@
+flowchart LR
+  PA["Platform admin"]
+  SA["School admin"]
+  T["Teacher"]
+  S["Student"]
+  P["Parent"]
+  AI["AI service"]
+  subgraph W["Wasl platform"]
+    direction TB
+    UC1(["Manage schools"])
+    UC2(["Set up academic structure"])
+    UC3(["Enroll students and assign teachers"])
+    UC4(["Verify and link parent"])
+    UC5(["Publish lesson and resources"])
+    UC6(["Create assignment or exam"])
+    UC7(["Grade and release results"])
+    UC8(["Define skills and path rules"])
+    UC9(["Review support alerts"])
+    UC10(["Record attendance"])
+    UC11(["View lessons and resources"])
+    UC12(["Submit assignment or exam"])
+    UC13(["Follow catch-up plan"])
+    UC14(["Ask AI tutor"])
+    UC15(["Work offline and sync"])
+    UC16(["View child's progress"])
+    UC17(["Receive notifications"])
+    UC19(["Generate AI draft questions"])
+  end
+  PA --- UC1
+  SA --- UC2
+  SA --- UC3
+  SA --- UC4
+  T --- UC5
+  T --- UC6
+  T --- UC7
+  T --- UC8
+  T --- UC9
+  T --- UC10
+  T --- UC19
+  S --- UC11
+  S --- UC12
+  S --- UC13
+  S --- UC14
+  S --- UC15
+  P --- UC16
+  P --- UC17
+  UC14 -.->|uses| AI
+  UC19 -.->|uses| AI

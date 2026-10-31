@@ -1,0 +1,27 @@
+sequenceDiagram
+  autonumber
+  actor S as Student
+  participant M as Mobile app
+  participant API as Backend API
+  participant DB as PostgreSQL
+  participant FS as File storage
+  participant Q as Job queue
+  actor T as Teacher
+  actor P as Parent
+  S->>M: Open assignment and attach file
+  M->>API: POST /files/upload-url
+  API-->>M: Signed upload URL
+  M->>FS: PUT file
+  M->>API: POST /assessments/{id}/submissions
+  API->>API: Check JWT, role, school, enrollment, due date
+  API->>DB: Insert submission and answers
+  API-->>M: 201 Created
+  T->>API: POST /submissions/{id}/grade (scores, feedback)
+  API->>DB: Save grade and answer scores
+  API->>Q: Enqueue recalculate skill scores
+  Q->>DB: Update student_skill_scores
+  T->>API: POST /assessments/{id}/release
+  API->>DB: Mark results released
+  API->>Q: Enqueue notifications
+  Q-->>S: Push: result available
+  Q-->>P: Push: child's result available

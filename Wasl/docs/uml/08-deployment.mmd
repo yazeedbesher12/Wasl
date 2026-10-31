@@ -1,0 +1,31 @@
+flowchart TB
+  subgraph Clients
+    B["«device» Browser<br/>Next.js web app"]
+    Ph["«device» Android / iOS phone<br/>Expo app + SQLite"]
+  end
+  subgraph Server["«execution environment» Docker host"]
+    RP["«container» Nginx reverse proxy<br/>HTTPS"]
+    WEB["«container» Next.js server"]
+    API["«container» NestJS API"]
+    WK["«container» NestJS worker<br/>BullMQ jobs"]
+    AIS["«container» FastAPI AI service"]
+    PG[("«container» PostgreSQL 16<br/>+ pgvector")]
+    RD[("«container» Redis")]
+    MN[("«container» MinIO object storage")]
+  end
+  LLM["«external» LLM provider API"]
+  PUSH["«external» Expo push service"]
+  B -- HTTPS --> RP
+  Ph -- HTTPS --> RP
+  RP --> WEB
+  RP --> API
+  WEB --> API
+  API --> PG
+  API --> RD
+  API --> MN
+  API --> AIS
+  WK --> RD
+  WK --> PG
+  WK --> PUSH
+  AIS --> PG
+  AIS --> LLM
