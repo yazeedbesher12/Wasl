@@ -1,0 +1,15 @@
+import { useState } from "react";
+import { View } from "react-native";
+import { displayRecord, gradebook, label, number, resultTotal, totalMarks, visible } from "../../../packages/shared/src/demo";
+import { useNative } from "./context";
+import { Badge, Blank, Button, Card, Field, Select, styles, Txt } from "./ui";
+
+export function NativeGradebook() {
+  const { data, session, t, locale, ui, setUI, go } = useNative(); const [page, setPage] = useState(1);
+  const [search, classFilter, assessment, status] = ui.filters.gradebook ?? ["", "", "", ""];
+  if (!data) return null;
+  const set = (idx: number, value: string) => { setPage(1); setUI(old => { const values = [...(old.filters.gradebook ?? ["", "", "", ""])]; values[idx] = value; return { ...old, filters: { ...old.filters, gradebook: values } }; }); };
+  const rows = gradebook(data, session, classFilter, assessment, search).filter(r => !status || (r.submission?.values.status ?? "notSubmitted") === status);
+  const max = Math.max(1, Math.ceil(rows.length / 10)); const current = Math.min(page, max);
+  return <View><Card><Txt muted>{t("gradedHelp")}</Txt><Field label={t("search")} value={search} onChangeText={v => set(0, v)} /><Select label={t("filterClass")} value={classFilter} optional options={visible(data, session, "assignments").map(a => ({ value: a.id, label: displayRecord(data, "assignments", a, locale === "ar") }))} onChange={v => set(1, v)} /><Select label={t("assessmentId")} value={assessment} optional options={visible(data, session, "assessments").filter(a => a.values.status !== "draft" && (!classFilter || a.values.assignmentId === classFilter)).map(a => ({ value: a.id, label: label(locale, a) }))} onChange={v => set(2, v)} /><Select label={t("status")} value={status} optional options={["notSubmitted", "ungraded", "grading", "graded", "released"].map(s => ({ value: s, label: t(s) }))} onChange={v => set(3, v)} /><Button secondary onPress={() => setUI(old => ({ ...old, filters: { ...old.filters, gradebook: ["", "", "", ""] } }))}>{t("resetFilters")}</Button></Card>{!rows.length ? <Blank /> : rows.slice((current - 1) * 10, current * 10).map(r => <Card key={`${r.assessment.id}:${r.student.id}`}><Txt style={{ fontWeight: "700" }}>{label(locale, r.student)}</Txt><Txt muted>{displayRecord(data, "assignments", r.assignment, locale === "ar")}</Txt><Txt>{label(locale, r.assessment)}</Txt><Badge value={r.submission?.values.status ?? "notSubmitted"} /><Txt>{!r.submission || resultTotal(data, r.submission.id) === undefined ? t("noGrade") : `${number(locale, resultTotal(data, r.submission.id)!)} / ${number(locale, totalMarks(data, r.assessment.id))}`}</Txt>{r.submission && <Button secondary onPress={() => go({ page: "submissions", id: r.submission!.id })}>{t("view")}</Button>}</Card>)}<View style={styles.row}><Button secondary disabled={current <= 1} onPress={() => setPage(current - 1)}>{t("previous")}</Button><Txt>{number(locale, current)} {t("of")} {number(locale, max)}</Txt><Button secondary disabled={current >= max} onPress={() => setPage(current + 1)}>{t("next")}</Button></View></View>;
+}

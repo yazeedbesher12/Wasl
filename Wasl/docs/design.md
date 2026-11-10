@@ -158,3 +158,7 @@ Open questions for you:
 - [ ] Does Dr. Arandi require a specific document format (SRS, UML diagrams)?
 
 Answers so far: the interface is bilingual, Arabic and English with right-to-left layout; the deadline is open for now; the design is documented in UML (use case, class, sequence, activity, state and deployment diagrams) in UML design.
+
+## Current frontend demonstration stage
+
+Frontend-first work now provides Platform Admin web plus School Admin, Teacher, Student and Parent workspaces on web and native mobile, backed by a shared local demo repository. This is a temporary frontend adapter, not a change to the production architecture, Prisma model or API contracts above. Database selection and backend integration remain deferred. See [the connected frontend guide](frontend-demo.md) for implemented workflows, relationship mapping, versioned preservation of previous demo data, explicit snapshot transfer and manual review steps. See [the Student/Parent demo guide](student-parent-demo.md) for enrollment-based access, approved cross-school child context, answer drafts/final submissions and explicit result release. No timetable data exists in this frontend stage; schedule remains deferred.
