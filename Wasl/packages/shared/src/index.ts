@@ -11,6 +11,7 @@ export const LOCALES = ['ar', 'en'] as const;
 export type Locale = (typeof LOCALES)[number];
 
 export interface MembershipDto {
+  id?: string;
   schoolId: string | null;
   schoolName: string | null;
   role: Role;
@@ -22,6 +23,8 @@ export interface MeDto {
   fullName: string;
   preferredLanguage: Locale;
   activeSchoolId: string | null;
+  activeRole?: Role;
+  membershipId?: string;
   memberships: MembershipDto[];
 }
 
@@ -46,3 +49,4 @@ export interface ApiError {
 }
 
 export * from './client';
+export * from './foundation';

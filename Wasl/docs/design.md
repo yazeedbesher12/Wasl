@@ -161,4 +161,11 @@ Answers so far: the interface is bilingual, Arabic and English with right-to-lef
 
 ## Current frontend demonstration stage
 
+Current backend decision: implement the backend now and connect PostgreSQL later.
+Phase 1 adds database-independent auth, schools/identity, academic structure and
+approved Parent reads with development memory and implemented Prisma adapters.
+See [backend Phase 1](backend-phase1.md), [schema/API mapping](backend-schema-mapping.md)
+and [database handoff](database-handoff.md). Frontend apps still use their existing
+demo repository. Prisma, database behavior and RLS have not been runtime-verified.
+
 Frontend-first work now provides Platform Admin web plus School Admin, Teacher, Student and Parent workspaces on web and native mobile, backed by a shared local demo repository. This is a temporary frontend adapter, not a change to the production architecture, Prisma model or API contracts above. Database selection and backend integration remain deferred. See [the connected frontend guide](frontend-demo.md) for implemented workflows, relationship mapping, versioned preservation of previous demo data, explicit snapshot transfer and manual review steps. See [the Student/Parent demo guide](student-parent-demo.md) for enrollment-based access, approved cross-school child context, answer drafts/final submissions and explicit result release. No timetable data exists in this frontend stage; schedule remains deferred.

@@ -5,7 +5,8 @@ import { runWithTenant } from './tenant-context';
 
 /**
  * Runs each request handler inside the tenant context taken from the
- * verified JWT, so the Prisma extension can apply row-level security.
+ * validated JWT for request-local context. Repository units of work explicitly
+ * set transaction-local SQL settings; this interceptor is not an authorization boundary.
  */
 @Injectable()
 export class TenantInterceptor implements NestInterceptor {
@@ -15,7 +16,7 @@ export class TenantInterceptor implements NestInterceptor {
     const ctx = {
       userId: user?.sub ?? null,
       schoolId: user?.schoolId ?? null,
-      bypass: user?.role === 'PLATFORM_ADMIN',
+      bypass: false, // Privileged repository operations opt in internally, never by request role alone.
     };
     return new Observable((subscriber) =>
       runWithTenant(ctx, () => next.handle().subscribe(subscriber)),

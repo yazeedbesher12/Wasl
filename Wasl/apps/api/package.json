@@ -5,6 +5,7 @@
   "scripts": {
     "build": "prisma generate && nest build",
     "dev": "nest start --watch",
+    "dev:memory": "ts-node --transpile-only src/memory-main.ts",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",

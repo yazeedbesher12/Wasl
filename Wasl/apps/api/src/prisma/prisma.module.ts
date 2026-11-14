@@ -1,6 +1,3 @@
-import { Global, Module } from '@nestjs/common';
-import { PrismaService } from './prisma.service';
-
-@Global()
-@Module({ providers: [PrismaService], exports: [PrismaService] })
-export class PrismaModule {}
+// Compatibility entry point: StorageModule owns adapter selection.
+// No eager import of the Prisma runtime in memory mode.
+export { StorageModule as PrismaModule } from '../foundation/storage.module';

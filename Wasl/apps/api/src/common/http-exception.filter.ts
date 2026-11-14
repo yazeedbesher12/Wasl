@@ -17,7 +17,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       });
       return;
     }
-    console.error(exception);
+    // Never log raw ORM/auth exceptions: query inputs can contain credential material.
     res.status(500).json({ code: 'INTERNAL_SERVER_ERROR', message: 'Unexpected error' });
   }
 }

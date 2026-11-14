@@ -1,5 +1,12 @@
 # Handoff prompt for the coding agent
 
+Current implementation update: backend Phase 1 is now implemented with memory and
+Prisma repository adapters; database connection and verification remain deferred.
+The older scaffold/infra-first instructions below are historical. Start with
+[docs/backend-phase1.md](docs/backend-phase1.md), the schema mapping and database
+handoff linked there. Existing web/native demos remain intact. Do not run the old
+seed/migration/test/commit sequence as part of the current static-review-only task.
+
 Paste everything below the line into the agent in VS Code, with this folder open.
 
 ---

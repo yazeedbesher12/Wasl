@@ -5,7 +5,8 @@ import { AppModule } from './app.module';
 import { configureApp } from './setup';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { abortOnError: false, logger: ['log', 'warn'] });
+  app.enableShutdownHooks();
   configureApp(app);
 
   const swagger = new DocumentBuilder()
@@ -20,4 +21,8 @@ async function bootstrap() {
   await app.listen(port);
   console.log(`Wasl API on http://localhost:${port}/api/v1 (docs at /api/docs)`);
 }
-bootstrap();
+void bootstrap().catch(() => {
+  // Do not print raw driver errors, configuration values, URLs or credential-bearing objects.
+  console.error('Wasl API startup failed. Check the Phase 1 configuration and storage setup guide.');
+  process.exitCode = 1;
+});

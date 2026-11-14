@@ -1,41 +1,17 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
-import { currentTenant } from '../tenancy/tenant-context';
+import { PrismaClient, type Prisma } from '@prisma/client';
+import type { StorageScope } from '../foundation/repositories';
 
-function withTenant(base: PrismaClient) {
-  return base.$extends({
-    query: {
-      $allModels: {
-        async $allOperations({ args, query }) {
-          const ctx = currentTenant();
-          // Each query runs in a short transaction that first sets the
-          // tenant variables read by the row-level security policies.
-          const [, , , result] = await base.$transaction([
-            base.$executeRaw`SELECT set_config('app.school_id', ${ctx?.schoolId ?? ''}, true)`,
-            base.$executeRaw`SELECT set_config('app.user_id', ${ctx?.userId ?? ''}, true)`,
-            base.$executeRaw`SELECT set_config('app.bypass_rls', ${ctx?.bypass ? 'on' : 'off'}, true)`,
-            query(args),
-          ]);
-          return result;
-        },
-      },
-    },
-  });
-}
-
-export type TenantPrisma = ReturnType<typeof withTenant>;
-
-@Injectable()
-export class PrismaService implements OnModuleInit, OnModuleDestroy {
-  readonly base = new PrismaClient();
-  /** Use this client for all queries: it is scoped to the current tenant. */
-  readonly db: TenantPrisma = withTenant(this.base);
-
-  async onModuleInit() {
-    await this.base.$connect();
-  }
-
-  async onModuleDestroy() {
-    await this.base.$disconnect();
+/** Loaded only by Prisma storage. All queries in one operation share this transaction. */
+export class PrismaService {
+  readonly base: PrismaClient;
+  constructor(url: string) { this.base = new PrismaClient({ datasources: { db: { url } } }); }
+  async connect() { await this.base.$connect(); }
+  async close() { await this.base.$disconnect(); }
+  async transaction<T>(scope: StorageScope, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    return this.base.$transaction(async tx => {
+      const bypass = scope.kind === 'identity' || scope.kind === 'platform';
+      await tx.$queryRaw`SELECT set_config('app.school_id', ${scope.schoolId ?? ''}, true), set_config('app.user_id', ${scope.userId ?? ''}, true), set_config('app.bypass_rls', ${bypass ? 'on' : 'off'}, true)`;
+      return work(tx);
+    }, { isolationLevel: 'Serializable', maxWait: 5000, timeout: 10000 });
   }
 }

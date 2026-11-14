@@ -11,8 +11,8 @@ import { AuthService } from './auth.service';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         secret: config.getOrThrow<string>('JWT_ACCESS_SECRET'),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        signOptions: { expiresIn: config.get<string>('JWT_ACCESS_TTL', '15m') as any },
+        signOptions: { expiresIn: config.getOrThrow<number>('JWT_ACCESS_SECONDS'), algorithm: 'HS256', issuer: 'wasl', audience: 'wasl-clients' },
+        verifyOptions: { algorithms: ['HS256'], issuer: 'wasl', audience: 'wasl-clients' },
       }),
     }),
   ],
