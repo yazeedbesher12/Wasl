@@ -1,5 +1,13 @@
 # Database connection handoff — Phase 1
 
+**Subsequent backend update:** the existing schema now also has implemented
+content, question-bank, assessment, submission/answer and grading/release adapters.
+See [the assessment guide](backend-assessments.md). Prisma client generation,
+TypeScript checking and API memory tests were performed in that update; live
+PostgreSQL migrations, grants, RLS and concurrency are still unverified. The
+Phase 1-only operation list and historical non-execution statements below refer
+to that earlier phase.
+
 No database was provisioned or connected in this phase. The existing Prisma 6.9.0
 PostgreSQL schema, enum values, SQL mappings, UUIDs and nullability were preserved.
 The implemented adapter is source code awaiting database-backed verification,

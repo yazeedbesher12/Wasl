@@ -1,12 +1,13 @@
 import * as bcrypt from 'bcryptjs';
+import type { Assessment, AssessmentQuestion, SubmissionWithAnswers } from './entities';
 import type { AcademicMap, Lesson, Membership, ParentLink, Person, QuestionBank, QuestionOption, QuestionWithOptions, RefreshRecord, Resource, School, Unit } from './entities';
 
-export interface MemoryState { schools: School[]; users: Person[]; memberships: Membership[]; links: ParentLink[]; refresh: RefreshRecord[]; academics: { [K in keyof AcademicMap]: AcademicMap[K][] }; units: Unit[]; lessons: Lesson[]; resources: Resource[]; questionBanks: QuestionBank[]; questions: QuestionWithOptions[]; lockedQuestionIds: string[] }
+export interface MemoryState { schools: School[]; users: Person[]; memberships: Membership[]; links: ParentLink[]; refresh: RefreshRecord[]; academics: { [K in keyof AcademicMap]: AcademicMap[K][] }; units: Unit[]; lessons: Lesson[]; resources: Resource[]; questionBanks: QuestionBank[]; questions: QuestionWithOptions[]; assessments: Assessment[]; assessmentQuestions: AssessmentQuestion[]; submissions: SubmissionWithAnswers[] }
 export const developmentId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 /** Development-only server bootstrap. Independent of frontend fixtures and IDs. Never logs credentials. */
 export async function developmentState(password: string): Promise<MemoryState> {
   const at = new Date('2026-09-01T00:00:00.000Z'); const passwordHash = await bcrypt.hash(password, 12);
-  const s: MemoryState = { schools: [], users: [], memberships: [], links: [], refresh: [], academics: { academicYears: [], semesters: [], grades: [], sections: [], subjects: [], sectionSubjects: [], enrollments: [] }, units: [], lessons: [], resources: [], questionBanks: [], questions: [], lockedQuestionIds: [] };
+  const s: MemoryState = { schools: [], users: [], memberships: [], links: [], refresh: [], academics: { academicYears: [], semesters: [], grades: [], sections: [], subjects: [], sectionSubjects: [], enrollments: [] }, units: [], lessons: [], resources: [], questionBanks: [], questions: [], assessments: [], assessmentQuestions: [], submissions: [] };
   const person = (id: number, email: string, fullName: string) => s.users.push({ id: developmentId(id), email, fullName, passwordHash, preferredLanguage: 'ar', active: true, createdAt: at });
   person(100, 'platform@wasl.test', 'مدير منصة وصل'); person(130, 'parent@wasl.test', 'رنا خليل');
   s.memberships.push({ id: developmentId(300), userId: developmentId(100), schoolId: null, role: 'PLATFORM_ADMIN', active: true, createdAt: at });
@@ -35,7 +36,9 @@ export async function developmentState(password: string): Promise<MemoryState> {
     ];
     s.questionBanks.push(bank);
     s.questions.push({ id: questionId, schoolId, questionBankId: bank.id, type: 'MULTIPLE_CHOICE', text: 'What is two plus two?', points: 1, options });
-    s.lockedQuestionIds.push(questionId);
+    const assessmentId = developmentId(800 + i);
+    s.assessments.push({ id: assessmentId, schoolId, sectionSubjectId: developmentId(a + 5), type: 'ASSIGNMENT', title: 'Fictional open practice', instructions: null, opensAt: at, dueAt: null, status: 'OPEN', resultsReleasedAt: null, createdAt: at });
+    s.assessmentQuestions.push({ schoolId, assessmentId, questionId, order: 0 });
     s.links.push({ id: developmentId(600 + i), schoolId, parentId: developmentId(130), studentId: developmentId(u + 2), status: 'VERIFIED', verifiedAt: at, createdAt: at });
   }
   return s;

@@ -19,6 +19,14 @@ infra/        docker-compose (to be added)
 docs/         design and UML
 ```
 
+## Assessment backend update
+
+The API now implements units/lessons, resources/question banks, assignments/exams,
+student answer drafts/final submissions, manual marking and explicit result release
+for students and verified parents. See [the assessment API guide](docs/backend-assessments.md)
+for contracts, permissions, lifecycle, verification and remaining database/file work.
+Web/mobile screens continue to use their local demo data until the integration phase.
+
 ## Getting started (current state)
 
 Backend Phase 1 has development memory storage and implemented Prisma adapters.

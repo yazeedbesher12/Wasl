@@ -1,4 +1,5 @@
 import type { Role } from '@wasl/shared';
+import type { Answer, Assessment, AssessmentQuestion, Submission, SubmissionWithAnswers } from './entities';
 import type { AcademicKind, AcademicMap, Lesson, Membership, ParentLink, Person, Question, QuestionBank, QuestionOption, QuestionWithOptions, RefreshRecord, Resource, School, Unit } from './entities';
 
 export const STORAGE = Symbol('WASL_PHASE1_STORAGE');
@@ -66,7 +67,19 @@ export interface QuestionRepository {
   updateQuestion(row: Question, options: QuestionOption[]): Promise<QuestionWithOptions>;
   isQuestionLocked(id: string): Promise<boolean>;
 }
-export interface Repositories { identity: IdentityRepository; schools: SchoolRepository; people: PeopleRepository; academics: AcademicRepository; content: ContentRepository; questions: QuestionRepository; links: LinkRepository }
+export interface AssessmentRepository {
+  list(): Promise<Assessment[]>;
+  get(id: string): Promise<Assessment | null>;
+  create(row: Assessment): Promise<Assessment>;
+  update(row: Assessment): Promise<Assessment>;
+  questions(id: string): Promise<AssessmentQuestion[]>;
+  replaceQuestions(id: string, rows: AssessmentQuestion[]): Promise<void>;
+  submissions(assessmentId: string): Promise<SubmissionWithAnswers[]>;
+  submission(id: string): Promise<SubmissionWithAnswers | null>;
+  studentSubmission(assessmentId: string, studentId: string): Promise<SubmissionWithAnswers | null>;
+  saveSubmission(row: Submission, answers: Answer[], create: boolean): Promise<SubmissionWithAnswers>;
+}
+export interface Repositories { identity: IdentityRepository; schools: SchoolRepository; people: PeopleRepository; academics: AcademicRepository; content: ContentRepository; questions: QuestionRepository; links: LinkRepository; assessments: AssessmentRepository }
 /** A single atomic boundary for a complete service operation, including its scope checks. */
 export interface FoundationStorage {
   readonly driver: 'memory' | 'prisma';

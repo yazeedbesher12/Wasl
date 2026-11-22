@@ -1,4 +1,5 @@
 import type { EnrollmentStatus, LinkStatus, Locale, QuestionType, ResourceType, Role } from '@wasl/shared';
+import type { AssessmentStatus, AssessmentType, SubmissionStatus } from '@wasl/shared';
 
 // Persistence entities mirror schema.prisma. Dates remain Date objects inside adapters.
 export interface School { id: string; name: string; nameAr: string | null; locale: Locale; active: boolean; createdAt: Date }
@@ -23,3 +24,8 @@ export interface QuestionOption { id: string; schoolId: string; questionId: stri
 export interface QuestionWithOptions extends Question { options: QuestionOption[] }
 export interface AcademicMap { academicYears: AcademicYear; semesters: Semester; grades: Grade; sections: Section; subjects: Subject; sectionSubjects: SectionSubject; enrollments: Enrollment }
 export type AcademicKind = keyof AcademicMap;
+export interface Assessment { id: string; schoolId: string; sectionSubjectId: string; type: AssessmentType; title: string; instructions: string | null; opensAt: Date | null; dueAt: Date | null; status: AssessmentStatus; resultsReleasedAt: Date | null; createdAt: Date }
+export interface AssessmentQuestion { schoolId: string; assessmentId: string; questionId: string; order: number }
+export interface Submission { id: string; schoolId: string; assessmentId: string; studentId: string; clientId: string | null; status: SubmissionStatus; submittedAt: Date | null; score: number | null; feedback: string | null; gradedAt: Date | null }
+export interface Answer { id: string; schoolId: string; submissionId: string; questionId: string; response: string | null; fileKey: string | null; score: number | null }
+export interface SubmissionWithAnswers extends Submission { answers: Answer[] }

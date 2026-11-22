@@ -2,6 +2,7 @@ import type { LoginResponse, MeDto, TokenPair } from './index';
 import { ACADEMIC_PATHS } from './foundation';
 import type { AcademicCreate, AcademicDtoMap, AcademicKind, AcademicOverviewDto, AcademicUpdate, ChildDto, ClassDto, LessonCreate, LessonDto, LessonUpdate, LinkStatus, ListQuery, MembershipCreate, Page, ParentLinkCreate, ParentLinkDto, ProfileUpdate, PublishStatus, QuestionAuthorDto, QuestionBankCreate, QuestionBankDto, QuestionBankUpdate, QuestionCreate, QuestionSafeDto, QuestionType, QuestionUpdate, ResourceCreate, ResourceDto, ResourceType, ResourceUpdate, RosterEntryDto, SchoolAdministratorCreate, SchoolCreate, SchoolDto, SchoolMembershipDto, SchoolSummaryDto, SchoolUpdate, StorageHealthDto, UnitCreate, UnitDto, UnitUpdate, UserCreate, UserDto } from './foundation';
 import type { Role } from './index';
+import type { AssessmentAuthorDetailDto, AssessmentCreate, AssessmentDetailDto, AssessmentDto, AssessmentQuery, AssessmentQuestionsUpdate, AssessmentUpdate, GradeSubmissionInput, ReleasedResultDto, SaveAnswersInput, SubmissionDto, SubmissionQuery } from './assessment';
 
 /** Minimal typed API client shared by the web and mobile apps. */
 export class WaslClient {
@@ -93,6 +94,27 @@ export class WaslClient {
   updateQuestion(id: string, input: QuestionUpdate) { return this.request<QuestionAuthorDto>('/questions/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(input) }); }
   studentQuestions(query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'> & { questionBankId?: string; type?: QuestionType }) { return this.request<Page<QuestionSafeDto>>('/student/questions' + this.query(query)); }
   studentQuestion(id: string) { return this.request<QuestionSafeDto>('/student/questions/' + encodeURIComponent(id)); }
+  assessments(query?: AssessmentQuery) { return this.request<Page<AssessmentDto>>('/assessments' + this.query(query)); }
+  assessment(id: string) { return this.request<AssessmentDetailDto | AssessmentAuthorDetailDto>('/assessments/' + encodeURIComponent(id)); }
+  createAssessment(input: AssessmentCreate) { return this.request<AssessmentAuthorDetailDto>('/assessments', { method: 'POST', body: JSON.stringify(input) }); }
+  updateAssessment(id: string, input: AssessmentUpdate) { return this.request<AssessmentAuthorDetailDto>('/assessments/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(input) }); }
+  replaceAssessmentQuestions(id: string, input: AssessmentQuestionsUpdate) { return this.request<AssessmentAuthorDetailDto>('/assessments/' + encodeURIComponent(id) + '/questions', { method: 'PUT', body: JSON.stringify(input) }); }
+  publishAssessment(id: string) { return this.assessmentAction(id, 'publish'); }
+  unpublishAssessment(id: string) { return this.assessmentAction(id, 'unpublish'); }
+  closeAssessment(id: string) { return this.assessmentAction(id, 'close'); }
+  startAssessmentGrading(id: string) { return this.assessmentAction(id, 'start-grading'); }
+  releaseAssessmentResults(id: string) { return this.assessmentAction(id, 'release'); }
+  archiveAssessment(id: string) { return this.assessmentAction(id, 'archive'); }
+  private assessmentAction(id: string, action: 'publish' | 'unpublish' | 'close' | 'start-grading' | 'release' | 'archive') { return this.request<AssessmentAuthorDetailDto>('/assessments/' + encodeURIComponent(id) + '/' + action, { method: 'POST' }); }
+  assessmentSubmissions(id: string, query?: SubmissionQuery) { return this.request<Page<SubmissionDto>>('/assessments/' + encodeURIComponent(id) + '/submissions' + this.query(query)); }
+  ownAssessmentSubmission(id: string) { return this.request<SubmissionDto>('/assessments/' + encodeURIComponent(id) + '/submission'); }
+  saveAssessmentAnswers(id: string, input: SaveAnswersInput) { return this.request<SubmissionDto>('/assessments/' + encodeURIComponent(id) + '/submission', { method: 'PUT', body: JSON.stringify(input) }); }
+  submitAssessment(id: string, input: SaveAnswersInput) { return this.request<SubmissionDto>('/assessments/' + encodeURIComponent(id) + '/submit', { method: 'POST', body: JSON.stringify(input) }); }
+  submission(id: string) { return this.request<SubmissionDto>('/submissions/' + encodeURIComponent(id)); }
+  gradeSubmission(id: string, input: GradeSubmissionInput) { return this.request<SubmissionDto>('/submissions/' + encodeURIComponent(id) + '/grade', { method: 'POST', body: JSON.stringify(input) }); }
+  myTasks(query?: AssessmentQuery) { return this.request<Page<AssessmentDto>>('/me/tasks' + this.query(query)); }
+  myGrades(query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'>) { return this.request<Page<ReleasedResultDto>>('/me/grades' + this.query(query)); }
+  childGrades(studentId: string, query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'> & { schoolId?: string }) { return this.request<Page<ReleasedResultDto>>('/parent/children/' + encodeURIComponent(studentId) + '/grades' + this.query(query)); }
   teacherClasses(query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'>) { return this.request<Page<ClassDto>>('/teacher/classes' + this.query(query)); }
   teacherRoster(assignmentId: string, query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'>) { return this.request<Page<RosterEntryDto>>('/teacher/classes/' + encodeURIComponent(assignmentId) + '/roster' + this.query(query)); }
   roster(assignmentId: string, query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'>) { return this.request<Page<RosterEntryDto>>('/section-subjects/' + encodeURIComponent(assignmentId) + '/roster' + this.query(query)); }
