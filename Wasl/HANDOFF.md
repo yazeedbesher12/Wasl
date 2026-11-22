@@ -1,5 +1,13 @@
 # Handoff prompt for the coding agent
 
+Latest update: actual authenticated files (local development or private S3/MinIO),
+announcement lifecycle and transactional in-app notification events are implemented.
+FileObject and announcement lifecycle fields have reviewed-source migration SQL,
+including an initial schema baseline for fresh databases. Start with
+[files and communication](docs/backend-files-communication.md). Earlier statements
+that the schema is unchanged or no migration history exists are historical.
+No live database or S3 instance has been configured or migrated by this update.
+
 Latest backend update: units/lessons, resources/question banks and the complete
 assessment → submission → marking → released student/parent results API are now
 implemented with memory and Prisma adapters. Start with

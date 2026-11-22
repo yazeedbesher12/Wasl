@@ -17,3 +17,6 @@ __pycache__/
 .DS_Store
 next-env.d.ts
 *.tsbuildinfo
+
+# Private development object bytes
+.wasl-data/

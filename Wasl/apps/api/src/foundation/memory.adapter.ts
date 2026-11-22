@@ -1,3 +1,4 @@
+import { memoryFiles, memoryCommunication } from './communication.memory.repository';
 import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { AcademicKind, AcademicMap, Membership } from './entities';
 import type { FoundationStorage, Repositories, StorageScope } from './repositories';
@@ -39,6 +40,8 @@ export class MemoryStorage implements FoundationStorage {
       return row;
     };
     return {
+      files: memoryFiles(s, scope.schoolId),
+      communication: memoryCommunication(s, scope.schoolId, scope.userId),
       assessments: memoryAssessments(s, scope.schoolId),
       identity: {
         personById: async id => person(id) ?? null, personByEmail: async email => s.users.find(u => u.email === email) ?? null,

@@ -1,13 +1,14 @@
+import type { Announcement, FileObject, Notification } from './entities';
 import * as bcrypt from 'bcryptjs';
 import type { Assessment, AssessmentQuestion, SubmissionWithAnswers } from './entities';
 import type { AcademicMap, Lesson, Membership, ParentLink, Person, QuestionBank, QuestionOption, QuestionWithOptions, RefreshRecord, Resource, School, Unit } from './entities';
 
-export interface MemoryState { schools: School[]; users: Person[]; memberships: Membership[]; links: ParentLink[]; refresh: RefreshRecord[]; academics: { [K in keyof AcademicMap]: AcademicMap[K][] }; units: Unit[]; lessons: Lesson[]; resources: Resource[]; questionBanks: QuestionBank[]; questions: QuestionWithOptions[]; assessments: Assessment[]; assessmentQuestions: AssessmentQuestion[]; submissions: SubmissionWithAnswers[] }
+export interface MemoryState { files: FileObject[]; announcements: Announcement[]; notifications: Notification[]; schools: School[]; users: Person[]; memberships: Membership[]; links: ParentLink[]; refresh: RefreshRecord[]; academics: { [K in keyof AcademicMap]: AcademicMap[K][] }; units: Unit[]; lessons: Lesson[]; resources: Resource[]; questionBanks: QuestionBank[]; questions: QuestionWithOptions[]; assessments: Assessment[]; assessmentQuestions: AssessmentQuestion[]; submissions: SubmissionWithAnswers[] }
 export const developmentId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 /** Development-only server bootstrap. Independent of frontend fixtures and IDs. Never logs credentials. */
 export async function developmentState(password: string): Promise<MemoryState> {
   const at = new Date('2026-09-01T00:00:00.000Z'); const passwordHash = await bcrypt.hash(password, 12);
-  const s: MemoryState = { schools: [], users: [], memberships: [], links: [], refresh: [], academics: { academicYears: [], semesters: [], grades: [], sections: [], subjects: [], sectionSubjects: [], enrollments: [] }, units: [], lessons: [], resources: [], questionBanks: [], questions: [], assessments: [], assessmentQuestions: [], submissions: [] };
+  const s: MemoryState = { files: [], announcements: [], notifications: [], schools: [], users: [], memberships: [], links: [], refresh: [], academics: { academicYears: [], semesters: [], grades: [], sections: [], subjects: [], sectionSubjects: [], enrollments: [] }, units: [], lessons: [], resources: [], questionBanks: [], questions: [], assessments: [], assessmentQuestions: [], submissions: [] };
   const person = (id: number, email: string, fullName: string) => s.users.push({ id: developmentId(id), email, fullName, passwordHash, preferredLanguage: 'ar', active: true, createdAt: at });
   person(100, 'platform@wasl.test', 'مدير منصة وصل'); person(130, 'parent@wasl.test', 'رنا خليل');
   s.memberships.push({ id: developmentId(300), userId: developmentId(100), schoolId: null, role: 'PLATFORM_ADMIN', active: true, createdAt: at });

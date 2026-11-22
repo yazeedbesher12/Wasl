@@ -1,3 +1,5 @@
+import { requireAnswerFile } from '../files/file-access';
+import { notify, studentAndParentRecipients } from './communication.policy';
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { AssessmentAuthorDetailDto, AssessmentDetailDto, AssessmentDto, Page, ReleasedResultDto, Role, SubmissionDto } from '@wasl/shared';
@@ -146,7 +148,9 @@ export class AssessmentService {
       this.dates(a.opensAt, a.dueAt);
       const now = new Date();
       if (a.dueAt && a.dueAt <= now) throw new BadRequestException('The deadline must be in the future when publishing');
-      return this.detail(r, await r.assessments.update({ ...a, status: a.opensAt && a.opensAt > now ? 'SCHEDULED' : 'OPEN' }), true);
+      const published = await r.assessments.update({ ...a, status: a.opensAt && a.opensAt > now ? 'SCHEDULED' : 'OPEN' });
+      await notify(r, a.schoolId, 'ASSESSMENT_PUBLISHED', await studentAndParentRecipients(r, a.sectionSubjectId), { entityId: a.id, sectionSubjectId: a.sectionSubjectId });
+      return this.detail(r, published, true);
     });
   }
 
@@ -175,7 +179,11 @@ export class AssessmentService {
         if (state !== 'RESULTS_RELEASED') conflict('Only released assessments can be archived');
         status = 'ARCHIVED';
       }
-      return this.detail(r, await r.assessments.update({ ...a, status, resultsReleasedAt }), true);
+      const updated = await r.assessments.update({ ...a, status, resultsReleasedAt });
+      if (action === 'release') for (const submission of submissions.filter(s => s.status === 'GRADED')) {
+        await notify(r, a.schoolId, 'RESULTS_RELEASED', await studentAndParentRecipients(r, a.sectionSubjectId, submission.studentId), { entityId: a.id, sectionSubjectId: a.sectionSubjectId });
+      }
+      return this.detail(r, updated, true);
     });
   }
 
@@ -214,6 +222,7 @@ export class AssessmentService {
         } else if (q.type === 'FILE_UPLOAD') {
           const prefix = `schools/${a.schoolId}/students/${actor.sub}/`;
           if (!value.fileKey || !value.fileKey.startsWith(prefix) || value.fileKey.length <= prefix.length || /[^A-Za-z0-9_./-]/.test(value.fileKey) || value.fileKey.includes('..') || value.fileKey.includes('//') || value.optionId !== undefined || value.text !== undefined) throw new BadRequestException('File metadata must use the current student school namespace');
+          await requireAnswerFile(r, actor, value.fileKey, a.id);
           fileKey = value.fileKey;
         } else {
           if (value.text === undefined || value.optionId !== undefined || value.fileKey !== undefined || final && !value.text.trim()) throw new BadRequestException('Provide a written response for this question');
@@ -226,7 +235,14 @@ export class AssessmentService {
       const now = new Date();
       if (assessmentStatus(a, now) !== 'OPEN') conflict('This assessment is not open for answers');
       const row: Submission = { id: submissionId, schoolId: a.schoolId, assessmentId: id, studentId: actor.sub, clientId: null, status: final ? 'SUBMITTED' : 'IN_PROGRESS', submittedAt: final ? now : null, score: null, feedback: null, gradedAt: null };
-      return this.submissionDto(a, await r.assessments.saveSubmission(row, answers, !old));
+      const saved = await r.assessments.saveSubmission(row, answers, !old);
+      if (final) {
+        const assignment = await r.academics.get('sectionSubjects', a.sectionSubjectId);
+        const recipients = [{ userId: actor.sub, studentId: actor.sub }];
+        if (assignment?.teacherId && await r.people.eligible(assignment.teacherId, 'TEACHER')) recipients.push({ userId: assignment.teacherId, studentId: actor.sub });
+        await notify(r, a.schoolId, 'SUBMISSION_RECEIVED', recipients, { entityId: row.id, sectionSubjectId: a.sectionSubjectId });
+      }
+      return this.submissionDto(a, saved);
     });
   }
 

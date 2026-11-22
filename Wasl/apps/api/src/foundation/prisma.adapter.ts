@@ -1,3 +1,4 @@
+import { prismaFiles, prismaCommunication } from './communication.prisma.repository';
 import { ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException, type OnModuleDestroy } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { prismaAssessments } from './assessment.prisma.repository';
@@ -64,6 +65,8 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
     };
     const table = <K extends AcademicKind>(kind: K): AcademicTable<AcademicMap[K]> => tables[kind];
     return {
+      files: prismaFiles(tx, schoolId),
+      communication: prismaCommunication(tx, schoolId, scope.userId),
       assessments: prismaAssessments(tx, schoolId),
       identity: {
         personById: id => tx.user.findUnique({ where: { id } }), personByEmail: email => tx.user.findUnique({ where: { email } }),

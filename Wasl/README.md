@@ -19,6 +19,14 @@ infra/        docker-compose (to be added)
 docs/         design and UML
 ```
 
+## Files and communication backend update
+
+The API supports real private file uploads/downloads, draft/published/archived
+announcements and in-app notifications for publication, final submission and
+released results. See [the file/communication guide](docs/backend-files-communication.md)
+for upload contracts, role checks, local/S3 storage and the additive migrations.
+Frontend integration and live PostgreSQL/S3 verification remain separate.
+
 ## Assessment backend update
 
 The API now implements units/lessons, resources/question banks, assignments/exams,

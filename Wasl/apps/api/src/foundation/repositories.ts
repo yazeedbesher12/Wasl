@@ -1,4 +1,5 @@
 import type { Role } from '@wasl/shared';
+import type { Announcement, FileObject, Notification } from './entities';
 import type { Answer, Assessment, AssessmentQuestion, Submission, SubmissionWithAnswers } from './entities';
 import type { AcademicKind, AcademicMap, Lesson, Membership, ParentLink, Person, Question, QuestionBank, QuestionOption, QuestionWithOptions, RefreshRecord, Resource, School, Unit } from './entities';
 
@@ -79,7 +80,17 @@ export interface AssessmentRepository {
   studentSubmission(assessmentId: string, studentId: string): Promise<SubmissionWithAnswers | null>;
   saveSubmission(row: Submission, answers: Answer[], create: boolean): Promise<SubmissionWithAnswers>;
 }
-export interface Repositories { identity: IdentityRepository; schools: SchoolRepository; people: PeopleRepository; academics: AcademicRepository; content: ContentRepository; questions: QuestionRepository; links: LinkRepository; assessments: AssessmentRepository }
+export interface FileRepository { get(id: string): Promise<FileObject | null>; byKey(key: string): Promise<FileObject | null>; create(row: FileObject): Promise<FileObject> }
+export interface CommunicationRepository {
+  announcements(): Promise<Announcement[]>;
+  announcement(id: string): Promise<Announcement | null>;
+  createAnnouncement(row: Announcement): Promise<Announcement>;
+  updateAnnouncement(row: Announcement): Promise<Announcement>;
+  notifications(userId: string): Promise<Notification[]>;
+  notify(rows: Notification[]): Promise<void>;
+  markRead(id: string, userId: string, at: Date): Promise<Notification>;
+}
+export interface Repositories { identity: IdentityRepository; schools: SchoolRepository; people: PeopleRepository; academics: AcademicRepository; content: ContentRepository; questions: QuestionRepository; links: LinkRepository; assessments: AssessmentRepository; files: FileRepository; communication: CommunicationRepository }
 /** A single atomic boundary for a complete service operation, including its scope checks. */
 export interface FoundationStorage {
   readonly driver: 'memory' | 'prisma';

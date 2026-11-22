@@ -3,7 +3,7 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { WaslClient } from '@wasl/shared';
-import { bearer, createMemoryApp, developmentId as id, login, TEST_PASSWORD } from './memory-harness';
+import { bearer, createMemoryApp, developmentId as id, login, TEST_PASSWORD, uploadTestFile } from './memory-harness';
 
 const root = '/api/v1';
 type Actor = 'teacher' | 'student' | 'admin' | 'parent' | 'otherTeacher' | 'otherStudent' | 'peerTeacher' | 'peerStudent' | 'platform';
@@ -177,7 +177,7 @@ describe('Assessment, submission and result API (memory)', () => {
     expect(cleared.body.id).toBe(saved.body.id);
   });
 
-  it('supports written and file metadata responses while hiding short-answer model answers', async () => {
+  it('supports written and uploaded-file responses while hiding short-answer model answers', async () => {
     const b = await build({}, 0);
     const qs = [];
     for (const type of ['SHORT_ANSWER', 'ESSAY', 'FILE_UPLOAD']) {
@@ -190,7 +190,8 @@ describe('Assessment, submission and result API (memory)', () => {
     expect(detail.body.questions[0].options).toEqual([]);
     expect(JSON.stringify(detail.body)).not.toContain('SECRET_MODEL_ANSWER');
     expect(JSON.stringify((await call('student', 'get', `/student/questions/${qs[0].id}`)).body)).not.toContain('SECRET_MODEL_ANSWER');
-    const values = [{ questionId: qs[0].id, text: 'My answer' }, { questionId: qs[1].id, text: 'My essay' }, { questionId: qs[2].id, fileKey: `schools/${id(1)}/students/${id(112)}/answer.pdf` }];
+    const uploaded = await uploadTestFile(app, tokens.student, { purpose: 'ASSESSMENT_ANSWER', assessmentId: b.assessmentId });
+    const values = [{ questionId: qs[0].id, text: 'My answer' }, { questionId: qs[1].id, text: 'My essay' }, { questionId: qs[2].id, fileKey: uploaded.storageKey }];
     for (const key of [`schools/${id(2)}/students/${id(112)}/x.pdf`, `schools/${id(1)}/students/${peerStudentId}/x.pdf`, `schools/${id(1)}/students/${id(112)}/../x.pdf`]) {
       expect((await call('student', 'post', `/assessments/${b.assessmentId}/submit`, { answers: [...values.slice(0, 2), { questionId: qs[2].id, fileKey: key }] })).status).toBe(400);
     }

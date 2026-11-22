@@ -1,3 +1,4 @@
+import { FilesModule } from './files/files.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
@@ -18,6 +19,7 @@ import { TenantInterceptor } from './tenancy/tenant.interceptor';
     StorageModule,
     AuthModule,
     FoundationModule,
+    FilesModule,
   ],
   controllers: [HealthController, MeController],
   providers: [
