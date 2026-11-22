@@ -1,5 +1,5 @@
 import type { Role } from '@wasl/shared';
-import type { AcademicKind, AcademicMap, Lesson, Membership, ParentLink, Person, RefreshRecord, School, Unit } from './entities';
+import type { AcademicKind, AcademicMap, Lesson, Membership, ParentLink, Person, Question, QuestionBank, QuestionOption, QuestionWithOptions, RefreshRecord, Resource, School, Unit } from './entities';
 
 export const STORAGE = Symbol('WASL_PHASE1_STORAGE');
 /** These scopes are server-created only; never accepted from an HTTP request body. */
@@ -50,8 +50,23 @@ export interface ContentRepository {
   getLesson(id: string): Promise<Lesson | null>;
   createLesson(row: Lesson): Promise<Lesson>;
   updateLesson(row: Lesson): Promise<Lesson>;
+  listResources(): Promise<Resource[]>;
+  getResource(id: string): Promise<Resource | null>;
+  createResource(row: Resource): Promise<Resource>;
+  updateResource(row: Resource): Promise<Resource>;
 }
-export interface Repositories { identity: IdentityRepository; schools: SchoolRepository; people: PeopleRepository; academics: AcademicRepository; content: ContentRepository; links: LinkRepository }
+export interface QuestionRepository {
+  listBanks(): Promise<QuestionBank[]>;
+  getBank(id: string): Promise<QuestionBank | null>;
+  createBank(row: QuestionBank): Promise<QuestionBank>;
+  updateBank(row: QuestionBank): Promise<QuestionBank>;
+  listQuestions(): Promise<QuestionWithOptions[]>;
+  getQuestion(id: string): Promise<QuestionWithOptions | null>;
+  createQuestion(row: Question, options: QuestionOption[]): Promise<QuestionWithOptions>;
+  updateQuestion(row: Question, options: QuestionOption[]): Promise<QuestionWithOptions>;
+  isQuestionLocked(id: string): Promise<boolean>;
+}
+export interface Repositories { identity: IdentityRepository; schools: SchoolRepository; people: PeopleRepository; academics: AcademicRepository; content: ContentRepository; questions: QuestionRepository; links: LinkRepository }
 /** A single atomic boundary for a complete service operation, including its scope checks. */
 export interface FoundationStorage {
   readonly driver: 'memory' | 'prisma';

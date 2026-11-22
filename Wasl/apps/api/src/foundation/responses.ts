@@ -1,6 +1,6 @@
 import { applyDecorators, type Type } from '@nestjs/common';
 import { ApiCreatedResponse, ApiExtraModels, ApiOkResponse, ApiProperty, ApiPropertyOptional, getSchemaPath } from '@nestjs/swagger';
-import { ENROLLMENT_STATUSES, LINK_STATUSES, PUBLISH_STATUSES, ROLES, SCHOOL_ROLES } from '@wasl/shared';
+import { ENROLLMENT_STATUSES, LINK_STATUSES, PUBLISH_STATUSES, QUESTION_TYPES, RESOURCE_TYPES, ROLES, SCHOOL_ROLES } from '@wasl/shared';
 
 // Public response models only; no persistence entity is registered with Swagger.
 export class SchoolResponse {
@@ -40,6 +40,12 @@ export class AssignmentResponse extends AcademicBase { @ApiProperty({ format: 'u
 export class EnrollmentResponse extends AcademicBase { @ApiProperty({ format: 'uuid' }) sectionId: string; @ApiProperty({ format: 'uuid' }) studentId: string; @ApiProperty({ enum: [...ENROLLMENT_STATUSES] }) status: string; @ApiProperty({ format: 'date-time' }) createdAt: string; }
 export class UnitResponse extends AcademicBase { @ApiProperty({ format: 'uuid' }) sectionSubjectId: string; @ApiProperty() title: string; @ApiProperty() order: number; }
 export class LessonResponse extends AcademicBase { @ApiProperty({ format: 'uuid' }) unitId: string; @ApiProperty() title: string; @ApiProperty({ type: String, nullable: true }) body: string | null; @ApiProperty() order: number; @ApiProperty({ enum: [...PUBLISH_STATUSES] }) status: string; @ApiProperty({ type: String, nullable: true, format: 'date-time' }) publishedAt: string | null; }
+export class ResourceResponse extends AcademicBase { @ApiProperty({ format: 'uuid', type: String, nullable: true }) lessonId: string | null; @ApiProperty({ enum: [...RESOURCE_TYPES] }) type: string; @ApiProperty() title: string; @ApiProperty({ type: String, nullable: true, description: 'File metadata only; no upload or download is implied.' }) storageKey: string | null; @ApiProperty({ type: String, nullable: true }) url: string | null; @ApiProperty() offlineAllowed: boolean; @ApiProperty({ format: 'date-time' }) createdAt: string; }
+export class QuestionBankResponse extends AcademicBase { @ApiProperty({ format: 'uuid' }) subjectId: string; @ApiProperty({ format: 'uuid' }) ownerId: string; @ApiProperty() name: string; }
+export class QuestionOptionAuthorResponse { @ApiProperty({ format: 'uuid' }) id: string; @ApiProperty() text: string; @ApiProperty({ description: 'Authoring-only correctness metadata; never returned by student routes.' }) isCorrect: boolean; }
+export class QuestionOptionSafeResponse { @ApiProperty({ format: 'uuid' }) id: string; @ApiProperty() text: string; }
+export class QuestionAuthorResponse extends AcademicBase { @ApiProperty({ format: 'uuid' }) questionBankId: string; @ApiProperty({ enum: [...QUESTION_TYPES] }) type: string; @ApiProperty() text: string; @ApiProperty() points: number; @ApiProperty({ type: [QuestionOptionAuthorResponse] }) options: QuestionOptionAuthorResponse[]; }
+export class QuestionSafeResponse extends AcademicBase { @ApiProperty({ format: 'uuid' }) questionBankId: string; @ApiProperty({ enum: [...QUESTION_TYPES] }) type: string; @ApiProperty() text: string; @ApiProperty() points: number; @ApiProperty({ type: [QuestionOptionSafeResponse], description: 'Correctness metadata is intentionally omitted.' }) options: QuestionOptionSafeResponse[]; }
 export class LinkResponse extends AcademicBase { @ApiProperty({ format: 'uuid' }) parentId: string; @ApiProperty({ format: 'uuid' }) studentId: string; @ApiProperty({ enum: [...LINK_STATUSES] }) status: string; @ApiProperty({ type: String, nullable: true, format: 'date-time' }) verifiedAt: string | null; @ApiProperty({ format: 'date-time' }) createdAt: string; }
 export class NamedPersonResponse { @ApiProperty({ format: 'uuid' }) id: string; @ApiProperty() fullName: string; }
 export class ClassResponse {

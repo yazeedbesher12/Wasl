@@ -1,6 +1,6 @@
 import type { LoginResponse, MeDto, TokenPair } from './index';
 import { ACADEMIC_PATHS } from './foundation';
-import type { AcademicCreate, AcademicDtoMap, AcademicKind, AcademicOverviewDto, AcademicUpdate, ChildDto, ClassDto, LessonCreate, LessonDto, LessonUpdate, LinkStatus, ListQuery, MembershipCreate, Page, ParentLinkCreate, ParentLinkDto, ProfileUpdate, PublishStatus, RosterEntryDto, SchoolAdministratorCreate, SchoolCreate, SchoolDto, SchoolMembershipDto, SchoolSummaryDto, SchoolUpdate, StorageHealthDto, UnitCreate, UnitDto, UnitUpdate, UserCreate, UserDto } from './foundation';
+import type { AcademicCreate, AcademicDtoMap, AcademicKind, AcademicOverviewDto, AcademicUpdate, ChildDto, ClassDto, LessonCreate, LessonDto, LessonUpdate, LinkStatus, ListQuery, MembershipCreate, Page, ParentLinkCreate, ParentLinkDto, ProfileUpdate, PublishStatus, QuestionAuthorDto, QuestionBankCreate, QuestionBankDto, QuestionBankUpdate, QuestionCreate, QuestionSafeDto, QuestionType, QuestionUpdate, ResourceCreate, ResourceDto, ResourceType, ResourceUpdate, RosterEntryDto, SchoolAdministratorCreate, SchoolCreate, SchoolDto, SchoolMembershipDto, SchoolSummaryDto, SchoolUpdate, StorageHealthDto, UnitCreate, UnitDto, UnitUpdate, UserCreate, UserDto } from './foundation';
 import type { Role } from './index';
 
 /** Minimal typed API client shared by the web and mobile apps. */
@@ -79,6 +79,20 @@ export class WaslClient {
   lesson(id: string) { return this.request<LessonDto>('/lessons/' + encodeURIComponent(id)); }
   createLesson(input: LessonCreate) { return this.request<LessonDto>('/lessons', { method: 'POST', body: JSON.stringify(input) }); }
   updateLesson(id: string, input: LessonUpdate) { return this.request<LessonDto>('/lessons/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(input) }); }
+  resources(query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'> & { lessonId?: string; type?: ResourceType }) { return this.request<Page<ResourceDto>>('/resources' + this.query(query)); }
+  resource(id: string) { return this.request<ResourceDto>('/resources/' + encodeURIComponent(id)); }
+  createResource(input: ResourceCreate) { return this.request<ResourceDto>('/resources', { method: 'POST', body: JSON.stringify(input) }); }
+  updateResource(id: string, input: ResourceUpdate) { return this.request<ResourceDto>('/resources/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(input) }); }
+  questionBanks(query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'> & { subjectId?: string; ownerId?: string }) { return this.request<Page<QuestionBankDto>>('/question-banks' + this.query(query)); }
+  questionBank(id: string) { return this.request<QuestionBankDto>('/question-banks/' + encodeURIComponent(id)); }
+  createQuestionBank(input: QuestionBankCreate) { return this.request<QuestionBankDto>('/question-banks', { method: 'POST', body: JSON.stringify(input) }); }
+  updateQuestionBank(id: string, input: QuestionBankUpdate) { return this.request<QuestionBankDto>('/question-banks/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(input) }); }
+  questions(bankId: string, query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'> & { type?: QuestionType }) { return this.request<Page<QuestionAuthorDto>>('/question-banks/' + encodeURIComponent(bankId) + '/questions' + this.query(query)); }
+  question(id: string) { return this.request<QuestionAuthorDto>('/questions/' + encodeURIComponent(id)); }
+  createQuestion(bankId: string, input: QuestionCreate) { return this.request<QuestionAuthorDto>('/question-banks/' + encodeURIComponent(bankId) + '/questions', { method: 'POST', body: JSON.stringify(input) }); }
+  updateQuestion(id: string, input: QuestionUpdate) { return this.request<QuestionAuthorDto>('/questions/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(input) }); }
+  studentQuestions(query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'> & { questionBankId?: string; type?: QuestionType }) { return this.request<Page<QuestionSafeDto>>('/student/questions' + this.query(query)); }
+  studentQuestion(id: string) { return this.request<QuestionSafeDto>('/student/questions/' + encodeURIComponent(id)); }
   teacherClasses(query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'>) { return this.request<Page<ClassDto>>('/teacher/classes' + this.query(query)); }
   teacherRoster(assignmentId: string, query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'>) { return this.request<Page<RosterEntryDto>>('/teacher/classes/' + encodeURIComponent(assignmentId) + '/roster' + this.query(query)); }
   roster(assignmentId: string, query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'>) { return this.request<Page<RosterEntryDto>>('/section-subjects/' + encodeURIComponent(assignmentId) + '/roster' + this.query(query)); }

@@ -97,6 +97,32 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
         getLesson: id => tx.lesson.findFirst({ where: { id, schoolId } }),
         createLesson: data => { scoped(data); return tx.lesson.create({ data }); },
         updateLesson: data => { scoped(data); return tx.lesson.update({ where: { id: data.id, schoolId }, data }); },
+        listResources: () => tx.resource.findMany({ where }),
+        getResource: id => tx.resource.findFirst({ where: { id, schoolId } }),
+        createResource: data => { scoped(data); return tx.resource.create({ data }); },
+        updateResource: data => { scoped(data); return tx.resource.update({ where: { id: data.id, schoolId }, data }); },
+      },
+      questions: {
+        listBanks: () => tx.questionBank.findMany({ where }),
+        getBank: id => tx.questionBank.findFirst({ where: { id, schoolId } }),
+        createBank: data => { scoped(data); return tx.questionBank.create({ data }); },
+        updateBank: data => { scoped(data); return tx.questionBank.update({ where: { id: data.id, schoolId }, data }); },
+        listQuestions: () => tx.question.findMany({ where, include: { options: true } }),
+        getQuestion: id => tx.question.findFirst({ where: { id, schoolId }, include: { options: true } }),
+        createQuestion: async (data, options) => {
+          scoped(data); options.forEach(scoped);
+          await tx.question.create({ data });
+          if (options.length) await tx.questionOption.createMany({ data: options });
+          return tx.question.findUniqueOrThrow({ where: { id: data.id }, include: { options: true } });
+        },
+        updateQuestion: async (data, options) => {
+          scoped(data); options.forEach(scoped);
+          await tx.question.update({ where: { id: data.id, schoolId }, data });
+          await tx.questionOption.deleteMany({ where: { questionId: data.id, schoolId } });
+          if (options.length) await tx.questionOption.createMany({ data: options });
+          return tx.question.findUniqueOrThrow({ where: { id: data.id }, include: { options: true } });
+        },
+        isQuestionLocked: async id => !!await tx.assessmentQuestion.findFirst({ where: { questionId: id, schoolId, assessment: { status: { not: 'DRAFT' } } }, select: { questionId: true } }),
       },
       links: {
         list: () => tx.parentStudentLink.findMany({ where }),

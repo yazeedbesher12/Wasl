@@ -9,6 +9,10 @@ export const ENROLLMENT_STATUSES = ['ACTIVE', 'TRANSFERRED', 'GRADUATED', 'WITHD
 export type EnrollmentStatus = typeof ENROLLMENT_STATUSES[number];
 export const PUBLISH_STATUSES = ['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const;
 export type PublishStatus = typeof PUBLISH_STATUSES[number];
+export const RESOURCE_TYPES = ['FILE', 'VIDEO', 'LINK'] as const;
+export type ResourceType = typeof RESOURCE_TYPES[number];
+export const QUESTION_TYPES = ['MULTIPLE_CHOICE', 'TRUE_FALSE', 'SHORT_ANSWER', 'ESSAY', 'FILE_UPLOAD'] as const;
+export type QuestionType = typeof QUESTION_TYPES[number];
 export interface Page<T> { items: T[]; total: number; page: number; limit: number }
 export interface ListQuery { page?: number; limit?: number; search?: string; sort?: 'name' | 'id'; order?: 'asc' | 'desc'; active?: 'true' | 'false'; role?: SchoolRole; status?: EnrollmentStatus | LinkStatus; academicYearId?: string; sectionId?: string }
 export interface SchoolDto { id: string; name: string; nameAr: string | null; locale: Locale; active: boolean; createdAt: string }
@@ -34,6 +38,19 @@ export interface UnitUpdate { title?: string; order?: number }
 export interface LessonDto { id: string; schoolId: string; unitId: string; title: string; body: string | null; order: number; status: PublishStatus; publishedAt: string | null }
 export interface LessonCreate { unitId: string; title: string; body?: string | null; order?: number }
 export interface LessonUpdate { title?: string; body?: string | null; order?: number; status?: PublishStatus }
+export interface ResourceDto { id: string; schoolId: string; lessonId: string | null; type: ResourceType; title: string; storageKey: string | null; url: string | null; offlineAllowed: boolean; createdAt: string }
+export interface ResourceCreate { lessonId?: string | null; type: ResourceType; title: string; storageKey?: string | null; url?: string | null; offlineAllowed?: boolean }
+export interface ResourceUpdate { lessonId?: string | null; type?: ResourceType; title?: string; storageKey?: string | null; url?: string | null; offlineAllowed?: boolean }
+export interface QuestionBankDto { id: string; schoolId: string; subjectId: string; ownerId: string; name: string }
+export interface QuestionBankCreate { subjectId: string; ownerId?: string; name: string }
+export interface QuestionBankUpdate { name?: string }
+export interface QuestionOptionInput { text: string; isCorrect: boolean }
+export interface QuestionOptionAuthorDto extends QuestionOptionInput { id: string }
+export interface QuestionOptionSafeDto { id: string; text: string }
+export interface QuestionAuthorDto { id: string; schoolId: string; questionBankId: string; type: QuestionType; text: string; points: number; options: QuestionOptionAuthorDto[] }
+export interface QuestionSafeDto { id: string; schoolId: string; questionBankId: string; type: QuestionType; text: string; points: number; options: QuestionOptionSafeDto[] }
+export interface QuestionCreate { type: QuestionType; text: string; points?: number; options?: QuestionOptionInput[] }
+export interface QuestionUpdate { type?: QuestionType; text?: string; points?: number; options?: QuestionOptionInput[] }
 export interface AcademicDtoMap { academicYears: AcademicYearDto; semesters: SemesterDto; grades: GradeDto; sections: SectionDto; subjects: SubjectDto; sectionSubjects: SectionSubjectDto; enrollments: EnrollmentDto }
 export type AcademicKind = keyof AcademicDtoMap;
 export const ACADEMIC_PATHS: Record<AcademicKind, string> = { academicYears: 'academic-years', semesters: 'semesters', grades: 'grades', sections: 'sections', subjects: 'subjects', sectionSubjects: 'section-subjects', enrollments: 'enrollments' };
