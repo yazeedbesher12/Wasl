@@ -2,6 +2,7 @@ import { ConflictException, ForbiddenException, NotFoundException } from '@nestj
 import type { AcademicKind, AcademicMap, Membership } from './entities';
 import type { FoundationStorage, Repositories, StorageScope } from './repositories';
 import type { MemoryState } from './memory.seed';
+import { memoryAssessments } from './assessment.memory.repository';
 
 const missing = () => new NotFoundException('Record not found');
 /** Serialized copy-on-write units of work: failures roll back and refresh claims cannot race. */
@@ -38,6 +39,7 @@ export class MemoryStorage implements FoundationStorage {
       return row;
     };
     return {
+      assessments: memoryAssessments(s, scope.schoolId),
       identity: {
         personById: async id => person(id) ?? null, personByEmail: async email => s.users.find(u => u.email === email) ?? null,
         membershipsFor: async id => s.memberships.filter(m => m.userId === id),
@@ -88,7 +90,7 @@ export class MemoryStorage implements FoundationStorage {
         getQuestion: async id => s.questions.find(row => row.id === id && scoped(row)) ?? null,
         createQuestion: async (row, options) => { if (!scoped(row) || options.some(v => !scoped(v) || v.questionId !== row.id)) throw missing(); reference(s.questionBanks.find(v => v.id === row.questionBankId && scoped(v))); unique(s.questions.some(v => v.id === row.id)); unique(new Set(options.map(v => v.id)).size !== options.length); const result = { ...row, options }; s.questions.push(result); return result; },
         updateQuestion: async (row, options) => { const index = s.questions.findIndex(v => v.id === row.id && scoped(v)); if (index < 0 || !scoped(row) || options.some(v => !scoped(v) || v.questionId !== row.id)) throw missing(); reference(s.questionBanks.find(v => v.id === row.questionBankId && scoped(v))); unique(new Set(options.map(v => v.id)).size !== options.length); const result = { ...row, options }; s.questions[index] = result; return result; },
-        isQuestionLocked: async id => s.lockedQuestionIds.includes(id),
+        isQuestionLocked: async id => s.assessmentQuestions.some(q => q.questionId === id && scoped(q) && s.assessments.some(a => a.id === q.assessmentId && scoped(a) && a.status !== 'DRAFT')),
       },
       links: {
         list: async () => s.links.filter(scoped),

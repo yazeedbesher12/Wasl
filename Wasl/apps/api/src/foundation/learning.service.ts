@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { Page, QuestionAuthorDto, QuestionBankDto, QuestionSafeDto, QuestionType, ResourceDto, ResourceType } from '@wasl/shared';
 import type { AuthUser } from '../auth/auth.types';
 import { requireActor } from './authorization';
+import { studentCanReadQuestions } from './assessment.policy';
 import type { Lesson, Question, QuestionOption, QuestionWithOptions, Resource, SectionSubject } from './entities';
 import type { CreateQuestionBankDto, CreateQuestionDto, CreateResourceDto, QuestionBankListDto, QuestionListDto, QuestionOptionInputDto, ResourceListDto, UpdateQuestionBankDto, UpdateQuestionDto, UpdateResourceDto } from './dto';
 import { questionAuthorDto, questionBankDto, questionSafeDto, resourceDto } from './mapping';
@@ -257,11 +258,22 @@ export class LearningService {
     });
   }
 
+  private async studentQuestionIds(repositories: Repositories, actor: AuthUser): Promise<Set<string>> {
+    const assignments = new Set((await this.actorAssignments(repositories, actor)).map(a => a.id));
+    const ids = new Set<string>();
+    for (const assessment of await repositories.assessments.list()) {
+      if (!assignments.has(assessment.sectionSubjectId) || !studentCanReadQuestions(assessment)) continue;
+      for (const question of await repositories.assessments.questions(assessment.id)) ids.add(question.questionId);
+    }
+    return ids;
+  }
+
   listStudentQuestions(actor: AuthUser, query: QuestionListDto): Promise<Page<QuestionSafeDto>> {
     return this.school(actor, ['STUDENT'], async repositories => {
+      const visibleIds = await this.studentQuestionIds(repositories, actor);
       const subjects = await this.accessibleSubjectIds(repositories, actor);
       const bankIds = new Set((await repositories.questions.listBanks()).filter(bank => subjects.has(bank.subjectId)).map(bank => bank.id));
-      const rows = (await repositories.questions.listQuestions()).filter(question => bankIds.has(question.questionBankId) && (!query.questionBankId || question.questionBankId === query.questionBankId) && (!query.type || question.type === query.type));
+      const rows = (await repositories.questions.listQuestions()).filter(question => visibleIds.has(question.id) && bankIds.has(question.questionBankId) && (!query.questionBankId || question.questionBankId === query.questionBankId) && (!query.type || question.type === query.type));
       const page = pageOf(rows, query, question => question.text);
       return { ...page, items: page.items.map(questionSafeDto) };
     });
@@ -272,7 +284,7 @@ export class LearningService {
       const question = await repositories.questions.getQuestion(id);
       if (!question) throw notFound();
       const bank = await repositories.questions.getBank(question.questionBankId);
-      if (!bank || !(await this.accessibleSubjectIds(repositories, actor)).has(bank.subjectId)) throw notFound();
+      if (!bank || !(await this.accessibleSubjectIds(repositories, actor)).has(bank.subjectId) || !(await this.studentQuestionIds(repositories, actor)).has(id)) throw notFound();
       return questionSafeDto(question);
     });
   }

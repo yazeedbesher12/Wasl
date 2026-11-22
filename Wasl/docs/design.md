@@ -159,6 +159,16 @@ Open questions for you:
 
 Answers so far: the interface is bilingual, Arabic and English with right-to-left layout; the deadline is open for now; the design is documented in UML (use case, class, sequence, activity, state and deployment diagrams) in UML design.
 
+## Current assessment backend implementation
+
+The Release 1 API now covers ordered assessment authoring/publication, server-time
+opening/closure, private student answer drafts, final submission, teacher marking
+and explicit result release to students and verified parents. The existing
+assessment lifecycle diagram and schema are retained. See
+[backend assessment contracts](backend-assessments.md) for endpoint paths, role
+rules, answer/result projections and verification. Web/mobile integration and
+PostgreSQL/RLS runtime verification remain deferred.
+
 ## Current frontend demonstration stage
 
 Current backend decision: implement the backend now and connect PostgreSQL later.

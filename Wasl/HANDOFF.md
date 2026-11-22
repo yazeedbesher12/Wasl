@@ -1,5 +1,12 @@
 # Handoff prompt for the coding agent
 
+Latest backend update: units/lessons, resources/question banks and the complete
+assessment → submission → marking → released student/parent results API are now
+implemented with memory and Prisma adapters. Start with
+[the assessment API guide](docs/backend-assessments.md). The schema is unchanged;
+PostgreSQL runtime/RLS and frontend integration remain deferred. The historical
+Phase 1-only and scaffold instructions below do not describe the current API.
+
 Current implementation update: backend Phase 1 is now implemented with memory and
 Prisma repository adapters; database connection and verification remain deferred.
 The older scaffold/infra-first instructions below are historical. Start with
