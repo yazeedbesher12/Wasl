@@ -32,5 +32,17 @@ export function validateEnvironment(env: Record<string, unknown>) {
     try { const url = new URL(origin); if (!['http:', 'https:', 'exp:'].includes(url.protocol) || url.origin !== origin && url.protocol !== 'exp:' || url.username || url.password || origin.includes('*')) throw new Error(); }
     catch { throw new Error('CORS_ORIGINS must contain explicit valid origins, never wildcards'); }
   }
-  return { ...env, WASL_STORAGE_DRIVER: driver, JWT_ACCESS_SECONDS: seconds, JWT_REFRESH_TTL_DAYS: days, CORS_ORIGINS: origins.join(',') };
+  const fileDriver = String(env.WASL_FILE_STORAGE_DRIVER ?? (production ? 's3' : 'local'));
+  if (!['local', 's3'].includes(fileDriver)) throw new Error('WASL_FILE_STORAGE_DRIVER must be local or s3');
+  if (production && fileDriver !== 's3') throw new Error('Production requires a private S3-compatible file store');
+  if (fileDriver === 's3') {
+    for (const key of ['S3_BUCKET', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY']) if (!String(env[key] ?? '').trim()) throw new Error(`${key} is required for S3 file storage`);
+    if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(String(env.S3_BUCKET))) throw new Error('Use a valid S3 bucket name');
+    if (env.S3_ENDPOINT) {
+      try { const url = new URL(String(env.S3_ENDPOINT)); if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || production && url.protocol !== 'https:') throw new Error(); }
+      catch { throw new Error('S3_ENDPOINT must be a valid endpoint (HTTPS in production)'); }
+    }
+    if (env.S3_FORCE_PATH_STYLE !== undefined && !['true', 'false'].includes(String(env.S3_FORCE_PATH_STYLE))) throw new Error('S3_FORCE_PATH_STYLE must be true or false');
+  }
+  return { ...env, WASL_FILE_STORAGE_DRIVER: fileDriver, WASL_STORAGE_DRIVER: driver, JWT_ACCESS_SECONDS: seconds, JWT_REFRESH_TTL_DAYS: days, CORS_ORIGINS: origins.join(',') };
 }

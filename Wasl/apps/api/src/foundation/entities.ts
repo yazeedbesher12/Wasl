@@ -1,5 +1,6 @@
 import type { EnrollmentStatus, LinkStatus, Locale, QuestionType, ResourceType, Role } from '@wasl/shared';
 import type { AssessmentStatus, AssessmentType, SubmissionStatus } from '@wasl/shared';
+import type { FilePurpose, NotificationPayload, NotificationType } from '@wasl/shared';
 
 // Persistence entities mirror schema.prisma. Dates remain Date objects inside adapters.
 export interface School { id: string; name: string; nameAr: string | null; locale: Locale; active: boolean; createdAt: Date }
@@ -29,3 +30,6 @@ export interface AssessmentQuestion { schoolId: string; assessmentId: string; qu
 export interface Submission { id: string; schoolId: string; assessmentId: string; studentId: string; clientId: string | null; status: SubmissionStatus; submittedAt: Date | null; score: number | null; feedback: string | null; gradedAt: Date | null }
 export interface Answer { id: string; schoolId: string; submissionId: string; questionId: string; response: string | null; fileKey: string | null; score: number | null }
 export interface SubmissionWithAnswers extends Submission { answers: Answer[] }
+export interface FileObject { id: string; schoolId: string; ownerId: string; purpose: FilePurpose; lessonId: string | null; assessmentId: string | null; storageKey: string; storageDriver: string; originalName: string; contentType: string; size: number; sha256: string; createdAt: Date }
+export interface Announcement { id: string; schoolId: string; authorId: string; sectionSubjectId: string | null; title: string; body: string; status: PublishStatus; publishedAt: Date | null; createdAt: Date }
+export interface Notification { id: string; schoolId: string; userId: string; type: NotificationType; payload: NotificationPayload; readAt: Date | null; createdAt: Date }

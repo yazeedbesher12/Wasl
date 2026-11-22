@@ -1,5 +1,14 @@
 # Database connection handoff — Phase 1
 
+**File/communication update:** additive FileObject metadata and announcement
+status/publishedAt are now in the Prisma schema. Initial baseline and feature
+migration SQL are supplied under `apps/api/prisma/migrations`; the feature includes
+RLS for files, announcements and notifications. They have not been applied to a
+live PostgreSQL database. Earlier instructions describing an unchanged schema or
+absent migration history are historical. Existing databases need schema comparison
+and deliberate baselining before these migrations; never reset existing data.
+See [the current guide](backend-files-communication.md).
+
 **Subsequent backend update:** the existing schema now also has implemented
 content, question-bank, assessment, submission/answer and grading/release adapters.
 See [the assessment guide](backend-assessments.md). Prisma client generation,

@@ -58,7 +58,7 @@ All schools share one PostgreSQL database, and every school-owned table carries 
 1. **Shared schema, `school_id` column.** Simpler to build and migrate than one database per school, and it lets a parent see children in two schools.
 2. **API layer.** A request guard reads the user's active school from the JWT and the membership table, and every repository query is scoped by it. No endpoint accepts a `school_id` from the client without checking membership.
 3. **Database layer.** PostgreSQL Row-Level Security policies filter rows by a per-request `app.school_id` setting, so a missed filter in code still cannot leak data.
-4. **Files.** Object keys are prefixed `schools/{school_id}/...` and served only through short-lived signed URLs.
+4. **Files.** Object keys are prefixed `schools/{school_id}/...`. The current API proxies authenticated uploads/downloads and rechecks access before returning bytes; signed object URLs remain a possible later optimization.
 5. **Tests.** An automated test suite logs in as users of school A and tries to read and write school B's data on every endpoint. This is the "cross-school access isolation" evaluation from the abstract.
 
 Parents are the one cross-school case: a `parent_student_link` row, approved by each child's school admin, grants read access to that child only.
@@ -158,6 +158,17 @@ Open questions for you:
 - [ ] Does Dr. Arandi require a specific document format (SRS, UML diagrams)?
 
 Answers so far: the interface is bilingual, Arabic and English with right-to-left layout; the deadline is open for now; the design is documented in UML (use case, class, sequence, activity, state and deployment diagrams) in UML design.
+
+## Current files and communication implementation
+
+Private FileObject metadata and local/S3-compatible object storage now support
+actual uploads and authenticated downloads. Lesson resources and submitted-file
+answers require owned uploaded records. Announcements use DRAFT/PUBLISHED/ARCHIVED
+and notifications are stored atomically with announcement/assessment publication,
+final submission and result release. See [current contracts](backend-files-communication.md).
+The schema includes file ownership/target metadata and announcement lifecycle
+fields, with baseline/feature migration SQL. Live PostgreSQL/RLS and S3 verification
+remain pending; existing frontend demos are not connected yet.
 
 ## Current assessment backend implementation
 

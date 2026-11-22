@@ -1,7 +1,7 @@
 import type { INestApplication } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { bearer, createMemoryApp, developmentId, login, TEST_PASSWORD } from './memory-harness';
+import { bearer, createMemoryApp, developmentId, login, TEST_PASSWORD, uploadTestFile } from './memory-harness';
 
 describe('Backend Phase 2 Resources and Question Banks with isolated memory storage', () => {
   let app: INestApplication;
@@ -36,16 +36,17 @@ describe('Backend Phase 2 Resources and Question Banks with isolated memory stor
     expect(detail.body).toMatchObject({ title: 'Updated reference', offlineAllowed: true });
   });
 
-  it('supports file metadata without claiming binary upload support', async () => {
+  it('accepts only a real uploaded lesson file', async () => {
     const teacher = await login(app, 'teacher1@wasl.test');
     const auth = bearer(teacher.accessToken);
+    const uploaded = await uploadTestFile(app, auth, { purpose: 'LESSON_RESOURCE', lessonId: developmentId(409) });
     const file = await request(app.getHttpServer()).post('/api/v1/resources').set('Authorization', auth).send({
-      lessonId: developmentId(409), type: 'FILE', title: 'Worksheet metadata', storageKey: 'schools/1/worksheets/fictional.pdf', offlineAllowed: true,
+      lessonId: developmentId(409), type: 'FILE', title: 'Worksheet metadata', storageKey: uploaded.storageKey, offlineAllowed: true,
     });
     const missingKey = await request(app.getHttpServer()).post('/api/v1/resources').set('Authorization', auth).send({ lessonId: developmentId(409), type: 'FILE', title: 'No key' });
     const unsafeKey = await request(app.getHttpServer()).post('/api/v1/resources').set('Authorization', auth).send({ lessonId: developmentId(409), type: 'FILE', title: 'Unsafe key', storageKey: '../secret' });
     expect(file.status).toBe(201);
-    expect(file.body).toMatchObject({ type: 'FILE', storageKey: 'schools/1/worksheets/fictional.pdf', url: null });
+    expect(file.body).toMatchObject({ type: 'FILE', storageKey: uploaded.storageKey, url: null });
     expect(missingKey.status).toBe(400);
     expect(unsafeKey.status).toBe(400);
   });

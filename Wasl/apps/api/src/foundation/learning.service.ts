@@ -1,3 +1,4 @@
+import { requireLessonFile } from '../files/file-access';
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Page, QuestionAuthorDto, QuestionBankDto, QuestionSafeDto, QuestionType, ResourceDto, ResourceType } from '@wasl/shared';
@@ -119,6 +120,7 @@ export class LearningService {
       const storageKey = input.storageKey ?? null;
       const url = input.url ?? null;
       this.validateResource(input.type, storageKey, url);
+      if (input.type === 'FILE') await requireLessonFile(repositories, actor, storageKey!, input.lessonId ?? null);
       return resourceDto(await repositories.content.createResource({ id: randomUUID(), schoolId: actor.schoolId!, lessonId: input.lessonId ?? null, type: input.type, title: input.title, storageKey, url, offlineAllowed: input.offlineAllowed ?? false, createdAt: new Date() }));
     });
   }
@@ -136,6 +138,7 @@ export class LearningService {
       const storageKey = input.storageKey === undefined ? old.storageKey : input.storageKey;
       const url = input.url === undefined ? old.url : input.url;
       this.validateResource(type, storageKey, url);
+      if (type === 'FILE') await requireLessonFile(repositories, actor, storageKey!, lessonId);
       return resourceDto(await repositories.content.updateResource({ ...old, lessonId, type, title: input.title ?? old.title, storageKey, url, offlineAllowed: input.offlineAllowed ?? old.offlineAllowed }));
     });
   }

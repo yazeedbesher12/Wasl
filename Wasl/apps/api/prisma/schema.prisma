@@ -44,6 +44,11 @@ enum PublishStatus {
   ARCHIVED
 }
 
+enum FilePurpose {
+  LESSON_RESOURCE
+  ASSESSMENT_ANSWER
+}
+
 enum ResourceType {
   FILE
   VIDEO
@@ -90,6 +95,7 @@ model School {
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at")
 
+  files         FileObject[]
   memberships   Membership[]
   academicYears AcademicYear[]
   grades        Grade[]
@@ -107,6 +113,7 @@ model User {
   active            Boolean  @default(true)
   createdAt         DateTime @default(now()) @map("created_at")
 
+  files         FileObject[]
   memberships   Membership[]
   refreshTokens RefreshToken[]
   parentLinks   ParentStudentLink[] @relation("ParentLinks")
@@ -304,6 +311,7 @@ model Lesson {
 
   unit      Unit       @relation(fields: [unitId], references: [id])
   resources Resource[]
+  files     FileObject[]
 
   @@index([schoolId])
   @@map("lessons")
@@ -387,6 +395,7 @@ model Assessment {
   sectionSubject SectionSubject       @relation(fields: [sectionSubjectId], references: [id])
   questions      AssessmentQuestion[]
   submissions    Submission[]
+  files          FileObject[]
 
   @@index([schoolId])
   @@map("assessments")
@@ -452,6 +461,8 @@ model Announcement {
   sectionSubjectId String?  @map("section_subject_id") @db.Uuid
   title            String
   body             String
+  status           PublishStatus @default(DRAFT)
+  publishedAt      DateTime? @map("published_at")
   createdAt        DateTime @default(now()) @map("created_at")
 
   @@index([schoolId])
@@ -470,4 +481,28 @@ model Notification {
   @@index([schoolId])
   @@index([userId])
   @@map("notifications")
+}
+
+// Private immutable objects. Metadata is committed only after bytes are stored.
+model FileObject {
+  id             String @id @default(uuid()) @db.Uuid
+  schoolId       String @map("school_id") @db.Uuid
+  ownerId        String @map("owner_id") @db.Uuid
+  purpose        FilePurpose
+  lessonId       String? @map("lesson_id") @db.Uuid
+  assessmentId   String? @map("assessment_id") @db.Uuid
+  storageKey     String @unique @map("storage_key")
+  storageDriver  String @map("storage_driver")
+  originalName   String @map("original_name")
+  contentType    String @map("content_type")
+  size           Int
+  sha256         String
+  createdAt      DateTime @default(now()) @map("created_at")
+  school         School @relation(fields: [schoolId], references: [id])
+  owner          User @relation(fields: [ownerId], references: [id])
+  lesson         Lesson? @relation(fields: [lessonId], references: [id])
+  assessment     Assessment? @relation(fields: [assessmentId], references: [id])
+  @@index([schoolId])
+  @@index([ownerId])
+  @@map("file_objects")
 }

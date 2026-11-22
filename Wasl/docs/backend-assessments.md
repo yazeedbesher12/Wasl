@@ -1,5 +1,12 @@
 # Assessment, submission and results backend
 
+**Subsequent file/communication update:** FILE_UPLOAD responses now require real
+uploaded file records owned by the student for this assessment. Lesson FILE
+resources similarly require a matching uploaded file. In-app publication,
+submission and release events are now implemented; see
+[the current guide](backend-files-communication.md). Historical metadata-only
+limitations and unchanged-schema statements below describe the earlier phase.
+
 Implemented on top of the existing Release 1 Prisma schema. The API and shared
 `WaslClient` now cover assignments/exams, student drafts and final submissions,
 manual marking and explicit result release. Web/mobile screens still use their

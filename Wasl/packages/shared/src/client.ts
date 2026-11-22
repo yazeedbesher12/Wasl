@@ -1,3 +1,4 @@
+import type { AnnouncementCreate, AnnouncementDto, AnnouncementQuery, AnnouncementUpdate, FileDto, NotificationDto, NotificationQuery } from './communication';
 import type { LoginResponse, MeDto, TokenPair } from './index';
 import { ACADEMIC_PATHS } from './foundation';
 import type { AcademicCreate, AcademicDtoMap, AcademicKind, AcademicOverviewDto, AcademicUpdate, ChildDto, ClassDto, LessonCreate, LessonDto, LessonUpdate, LinkStatus, ListQuery, MembershipCreate, Page, ParentLinkCreate, ParentLinkDto, ProfileUpdate, PublishStatus, QuestionAuthorDto, QuestionBankCreate, QuestionBankDto, QuestionBankUpdate, QuestionCreate, QuestionSafeDto, QuestionType, QuestionUpdate, ResourceCreate, ResourceDto, ResourceType, ResourceUpdate, RosterEntryDto, SchoolAdministratorCreate, SchoolCreate, SchoolDto, SchoolMembershipDto, SchoolSummaryDto, SchoolUpdate, StorageHealthDto, UnitCreate, UnitDto, UnitUpdate, UserCreate, UserDto } from './foundation';
@@ -16,7 +17,7 @@ export class WaslClient {
     const res = await fetch(`${this.baseUrl}${path}`, {
       ...init,
       headers: {
-        'Content-Type': 'application/json',
+        ...(typeof FormData !== 'undefined' && init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(init.headers ?? {}),
       },
@@ -115,6 +116,24 @@ export class WaslClient {
   myTasks(query?: AssessmentQuery) { return this.request<Page<AssessmentDto>>('/me/tasks' + this.query(query)); }
   myGrades(query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'>) { return this.request<Page<ReleasedResultDto>>('/me/grades' + this.query(query)); }
   childGrades(studentId: string, query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'> & { schoolId?: string }) { return this.request<Page<ReleasedResultDto>>('/parent/children/' + encodeURIComponent(studentId) + '/grades' + this.query(query)); }
+  uploadFile(form: FormData) { return this.request<FileDto>('/files', { method: 'POST', body: form }); }
+  file(id: string) { return this.request<FileDto>('/files/' + encodeURIComponent(id)); }
+  async downloadFile(id: string): Promise<Blob> {
+    const token = this.getToken();
+    const response = await fetch(this.baseUrl + '/files/' + encodeURIComponent(id) + '/content', { headers: token ? { Authorization: 'Bearer ' + token } : {} });
+    if (!response.ok) { const body = await response.json(); throw Object.assign(new Error(body?.message ?? response.statusText), { status: response.status, body }); }
+    return response.blob();
+  }
+  announcements(query?: AnnouncementQuery) { return this.request<Page<AnnouncementDto>>('/announcements' + this.query(query)); }
+  announcement(id: string) { return this.request<AnnouncementDto>('/announcements/' + encodeURIComponent(id)); }
+  createAnnouncement(input: AnnouncementCreate) { return this.request<AnnouncementDto>('/announcements', { method: 'POST', body: JSON.stringify(input) }); }
+  updateAnnouncement(id: string, input: AnnouncementUpdate) { return this.request<AnnouncementDto>('/announcements/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(input) }); }
+  publishAnnouncement(id: string) { return this.request<AnnouncementDto>('/announcements/' + encodeURIComponent(id) + '/publish', { method: 'POST' }); }
+  archiveAnnouncement(id: string) { return this.request<AnnouncementDto>('/announcements/' + encodeURIComponent(id) + '/archive', { method: 'POST' }); }
+  notifications(query?: NotificationQuery) { return this.request<Page<NotificationDto>>('/notifications' + this.query(query)); }
+  unreadNotificationCount() { return this.request<{ count: number }>('/notifications/unread-count'); }
+  readNotification(id: string) { return this.request<NotificationDto>('/notifications/' + encodeURIComponent(id) + '/read', { method: 'PATCH' }); }
+  readAllNotifications() { return this.request<{ count: number }>('/notifications/read-all', { method: 'POST' }); }
   teacherClasses(query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'>) { return this.request<Page<ClassDto>>('/teacher/classes' + this.query(query)); }
   teacherRoster(assignmentId: string, query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'>) { return this.request<Page<RosterEntryDto>>('/teacher/classes/' + encodeURIComponent(assignmentId) + '/roster' + this.query(query)); }
   roster(assignmentId: string, query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'>) { return this.request<Page<RosterEntryDto>>('/section-subjects/' + encodeURIComponent(assignmentId) + '/roster' + this.query(query)); }

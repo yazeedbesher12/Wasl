@@ -51,3 +51,4 @@ export interface ApiError {
 export * from './client';
 export * from './foundation';
 export * from './assessment';
+export * from './communication';

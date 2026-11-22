@@ -1,3 +1,8 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { LocalObjectStore, OBJECT_STORE } from '../src/files/object-store';
+import type { FileUploadInput } from '@wasl/shared';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { randomBytes } from 'node:crypto';
@@ -32,10 +37,13 @@ export interface TestSession {
 
 export async function createMemoryApp(): Promise<INestApplication> {
   const { AppModule } = await import('../src/app.module');
-  const testingModule = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  const directory = await mkdtemp(join(tmpdir(), 'wasl-test-files-'));
+  const testingModule = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(OBJECT_STORE).useValue(new LocalObjectStore(directory)).compile();
   const app = testingModule.createNestApplication();
   configureApp(app);
   await app.init();
+  const close = app.close.bind(app);
+  app.close = async () => { try { await close(); } finally { await rm(directory, { recursive: true, force: true }); } };
   return app;
 }
 
@@ -49,3 +57,13 @@ export async function login(app: INestApplication, email: string): Promise<TestS
 
 export const bearer = (token: string) => `Bearer ${token}`;
 export const developmentId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+export const TEST_PDF = Buffer.from('%PDF-1.7\nFictional test document\n%%EOF\n');
+export async function uploadTestFile(app: INestApplication, auth: string, input: FileUploadInput) {
+  let upload = request(app.getHttpServer()).post('/api/v1/files').set('Authorization', auth).field('purpose', input.purpose);
+  if (input.lessonId) upload = upload.field('lessonId', input.lessonId);
+  if (input.assessmentId) upload = upload.field('assessmentId', input.assessmentId);
+  const response = await upload.attach('file', TEST_PDF, { filename: 'worksheet.pdf', contentType: 'application/pdf' });
+  if (response.status !== 201) throw new Error(`Test file upload failed: ${response.status} ${JSON.stringify(response.body)}`);
+  return response.body as import('@wasl/shared').FileDto;
+}
