@@ -88,6 +88,16 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
         create: (kind, row) => { scoped(row); return table(kind).create(row); },
         update: (kind, row) => { scoped(row); return table(kind).update(row); },
       },
+      content: {
+        listUnits: () => tx.unit.findMany({ where }),
+        getUnit: id => tx.unit.findFirst({ where: { id, schoolId } }),
+        createUnit: data => { scoped(data); return tx.unit.create({ data }); },
+        updateUnit: data => { scoped(data); return tx.unit.update({ where: { id: data.id, schoolId }, data }); },
+        listLessons: () => tx.lesson.findMany({ where }),
+        getLesson: id => tx.lesson.findFirst({ where: { id, schoolId } }),
+        createLesson: data => { scoped(data); return tx.lesson.create({ data }); },
+        updateLesson: data => { scoped(data); return tx.lesson.update({ where: { id: data.id, schoolId }, data }); },
+      },
       links: {
         list: () => tx.parentStudentLink.findMany({ where }),
         forParent: parentId => parentId === scope.userId ? tx.parentStudentLink.findMany({ where: { parentId, status: 'VERIFIED', ...(scope.kind === 'parent-list' ? {} : where) } }) : Promise.resolve([]),

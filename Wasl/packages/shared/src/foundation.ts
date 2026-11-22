@@ -7,6 +7,8 @@ export const LINK_STATUSES = ['PENDING', 'VERIFIED', 'REJECTED'] as const;
 export type LinkStatus = typeof LINK_STATUSES[number];
 export const ENROLLMENT_STATUSES = ['ACTIVE', 'TRANSFERRED', 'GRADUATED', 'WITHDRAWN'] as const;
 export type EnrollmentStatus = typeof ENROLLMENT_STATUSES[number];
+export const PUBLISH_STATUSES = ['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const;
+export type PublishStatus = typeof PUBLISH_STATUSES[number];
 export interface Page<T> { items: T[]; total: number; page: number; limit: number }
 export interface ListQuery { page?: number; limit?: number; search?: string; sort?: 'name' | 'id'; order?: 'asc' | 'desc'; active?: 'true' | 'false'; role?: SchoolRole; status?: EnrollmentStatus | LinkStatus; academicYearId?: string; sectionId?: string }
 export interface SchoolDto { id: string; name: string; nameAr: string | null; locale: Locale; active: boolean; createdAt: string }
@@ -26,6 +28,12 @@ export interface SectionDto { id: string; schoolId: string; gradeId: string; aca
 export interface SubjectDto { id: string; schoolId: string; nameAr: string; nameEn: string; code: string | null }
 export interface SectionSubjectDto { id: string; schoolId: string; sectionId: string; subjectId: string; teacherId: string | null }
 export interface EnrollmentDto { id: string; schoolId: string; sectionId: string; studentId: string; status: EnrollmentStatus; createdAt: string }
+export interface UnitDto { id: string; schoolId: string; sectionSubjectId: string; title: string; order: number }
+export interface UnitCreate { sectionSubjectId: string; title: string; order?: number }
+export interface UnitUpdate { title?: string; order?: number }
+export interface LessonDto { id: string; schoolId: string; unitId: string; title: string; body: string | null; order: number; status: PublishStatus; publishedAt: string | null }
+export interface LessonCreate { unitId: string; title: string; body?: string | null; order?: number }
+export interface LessonUpdate { title?: string; body?: string | null; order?: number; status?: PublishStatus }
 export interface AcademicDtoMap { academicYears: AcademicYearDto; semesters: SemesterDto; grades: GradeDto; sections: SectionDto; subjects: SubjectDto; sectionSubjects: SectionSubjectDto; enrollments: EnrollmentDto }
 export type AcademicKind = keyof AcademicDtoMap;
 export const ACADEMIC_PATHS: Record<AcademicKind, string> = { academicYears: 'academic-years', semesters: 'semesters', grades: 'grades', sections: 'sections', subjects: 'subjects', sectionSubjects: 'section-subjects', enrollments: 'enrollments' };

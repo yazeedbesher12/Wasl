@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
@@ -18,8 +19,10 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, swagger));
 
   const port = Number(process.env.API_PORT ?? 4000);
-  await app.listen(port);
-  console.log(`Wasl API on http://localhost:${port}/api/v1 (docs at /api/docs)`);
+  const memoryMode = app.get(ConfigService).getOrThrow<string>('WASL_STORAGE_DRIVER') === 'memory';
+  if (memoryMode) await app.listen(port, '127.0.0.1');
+  else await app.listen(port);
+  console.log(`Wasl API on http://${memoryMode ? '127.0.0.1' : 'localhost'}:${port}/api/v1 (docs at /api/docs)`);
 }
 void bootstrap().catch(() => {
   // Do not print raw driver errors, configuration values, URLs or credential-bearing objects.

@@ -65,6 +65,16 @@ export class MemoryStorage implements FoundationStorage {
         get: async <K extends AcademicKind>(kind: K, id: string) => (s.academics[kind] as AcademicMap[K][]).find(v => v.id === id && scoped(v)) ?? null,
         create: async (kind, row) => putAcademic(kind, row, true), update: async (kind, row) => putAcademic(kind, row, false),
       },
+      content: {
+        listUnits: async () => s.units.filter(scoped),
+        getUnit: async id => s.units.find(row => row.id === id && scoped(row)) ?? null,
+        createUnit: async row => { if (!scoped(row)) throw missing(); reference(s.academics.sectionSubjects.find(v => v.id === row.sectionSubjectId && scoped(v))); unique(s.units.some(v => v.id === row.id)); s.units.push(row); return row; },
+        updateUnit: async row => { const index = s.units.findIndex(v => v.id === row.id && scoped(v)); if (index < 0 || !scoped(row)) throw missing(); reference(s.academics.sectionSubjects.find(v => v.id === row.sectionSubjectId && scoped(v))); s.units[index] = row; return row; },
+        listLessons: async () => s.lessons.filter(scoped),
+        getLesson: async id => s.lessons.find(row => row.id === id && scoped(row)) ?? null,
+        createLesson: async row => { if (!scoped(row)) throw missing(); reference(s.units.find(v => v.id === row.unitId && scoped(v))); unique(s.lessons.some(v => v.id === row.id)); s.lessons.push(row); return row; },
+        updateLesson: async row => { const index = s.lessons.findIndex(v => v.id === row.id && scoped(v)); if (index < 0 || !scoped(row)) throw missing(); reference(s.units.find(v => v.id === row.unitId && scoped(v))); s.lessons[index] = row; return row; },
+      },
       links: {
         list: async () => s.links.filter(scoped),
         forParent: async id => id === scope.userId ? s.links.filter(l => l.parentId === id && l.status === 'VERIFIED' && (scope.kind === 'parent-list' || scoped(l))) : [],

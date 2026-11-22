@@ -1,5 +1,5 @@
 import type { Role } from '@wasl/shared';
-import type { AcademicKind, AcademicMap, Membership, ParentLink, Person, RefreshRecord, School } from './entities';
+import type { AcademicKind, AcademicMap, Lesson, Membership, ParentLink, Person, RefreshRecord, School, Unit } from './entities';
 
 export const STORAGE = Symbol('WASL_PHASE1_STORAGE');
 /** These scopes are server-created only; never accepted from an HTTP request body. */
@@ -41,7 +41,17 @@ export interface LinkRepository {
   create(row: ParentLink): Promise<ParentLink>;
   update(row: ParentLink): Promise<ParentLink>;
 }
-export interface Repositories { identity: IdentityRepository; schools: SchoolRepository; people: PeopleRepository; academics: AcademicRepository; links: LinkRepository }
+export interface ContentRepository {
+  listUnits(): Promise<Unit[]>;
+  getUnit(id: string): Promise<Unit | null>;
+  createUnit(row: Unit): Promise<Unit>;
+  updateUnit(row: Unit): Promise<Unit>;
+  listLessons(): Promise<Lesson[]>;
+  getLesson(id: string): Promise<Lesson | null>;
+  createLesson(row: Lesson): Promise<Lesson>;
+  updateLesson(row: Lesson): Promise<Lesson>;
+}
+export interface Repositories { identity: IdentityRepository; schools: SchoolRepository; people: PeopleRepository; academics: AcademicRepository; content: ContentRepository; links: LinkRepository }
 /** A single atomic boundary for a complete service operation, including its scope checks. */
 export interface FoundationStorage {
   readonly driver: 'memory' | 'prisma';

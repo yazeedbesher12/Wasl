@@ -1,6 +1,6 @@
 import type { LoginResponse, MeDto, TokenPair } from './index';
 import { ACADEMIC_PATHS } from './foundation';
-import type { AcademicCreate, AcademicDtoMap, AcademicKind, AcademicOverviewDto, AcademicUpdate, ChildDto, ClassDto, LinkStatus, ListQuery, MembershipCreate, Page, ParentLinkCreate, ParentLinkDto, ProfileUpdate, RosterEntryDto, SchoolAdministratorCreate, SchoolCreate, SchoolDto, SchoolMembershipDto, SchoolSummaryDto, SchoolUpdate, StorageHealthDto, UserCreate, UserDto } from './foundation';
+import type { AcademicCreate, AcademicDtoMap, AcademicKind, AcademicOverviewDto, AcademicUpdate, ChildDto, ClassDto, LessonCreate, LessonDto, LessonUpdate, LinkStatus, ListQuery, MembershipCreate, Page, ParentLinkCreate, ParentLinkDto, ProfileUpdate, PublishStatus, RosterEntryDto, SchoolAdministratorCreate, SchoolCreate, SchoolDto, SchoolMembershipDto, SchoolSummaryDto, SchoolUpdate, StorageHealthDto, UnitCreate, UnitDto, UnitUpdate, UserCreate, UserDto } from './foundation';
 import type { Role } from './index';
 
 /** Minimal typed API client shared by the web and mobile apps. */
@@ -71,6 +71,14 @@ export class WaslClient {
   academicDetail<K extends AcademicKind>(kind: K, id: string) { return this.request<AcademicDtoMap[K]>('/' + ACADEMIC_PATHS[kind] + '/' + encodeURIComponent(id)); }
   createAcademic<K extends AcademicKind>(kind: K, input: AcademicCreate<K>) { return this.request<AcademicDtoMap[K]>('/' + ACADEMIC_PATHS[kind], { method: 'POST', body: JSON.stringify(input) }); }
   updateAcademic<K extends AcademicKind>(kind: K, id: string, input: AcademicUpdate<K>) { return this.request<AcademicDtoMap[K]>('/' + ACADEMIC_PATHS[kind] + '/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(input) }); }
+  units(query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'> & { sectionSubjectId?: string }) { return this.request<Page<UnitDto>>('/units' + this.query(query)); }
+  unit(id: string) { return this.request<UnitDto>('/units/' + encodeURIComponent(id)); }
+  createUnit(input: UnitCreate) { return this.request<UnitDto>('/units', { method: 'POST', body: JSON.stringify(input) }); }
+  updateUnit(id: string, input: UnitUpdate) { return this.request<UnitDto>('/units/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(input) }); }
+  lessons(query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'> & { unitId?: string; status?: PublishStatus }) { return this.request<Page<LessonDto>>('/lessons' + this.query(query)); }
+  lesson(id: string) { return this.request<LessonDto>('/lessons/' + encodeURIComponent(id)); }
+  createLesson(input: LessonCreate) { return this.request<LessonDto>('/lessons', { method: 'POST', body: JSON.stringify(input) }); }
+  updateLesson(id: string, input: LessonUpdate) { return this.request<LessonDto>('/lessons/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(input) }); }
   teacherClasses(query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'>) { return this.request<Page<ClassDto>>('/teacher/classes' + this.query(query)); }
   teacherRoster(assignmentId: string, query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'>) { return this.request<Page<RosterEntryDto>>('/teacher/classes/' + encodeURIComponent(assignmentId) + '/roster' + this.query(query)); }
   roster(assignmentId: string, query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'>) { return this.request<Page<RosterEntryDto>>('/section-subjects/' + encodeURIComponent(assignmentId) + '/roster' + this.query(query)); }

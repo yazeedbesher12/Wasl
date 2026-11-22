@@ -1,6 +1,6 @@
 import { applyDecorators, type Type } from '@nestjs/common';
 import { ApiCreatedResponse, ApiExtraModels, ApiOkResponse, ApiProperty, ApiPropertyOptional, getSchemaPath } from '@nestjs/swagger';
-import { ENROLLMENT_STATUSES, LINK_STATUSES, ROLES, SCHOOL_ROLES } from '@wasl/shared';
+import { ENROLLMENT_STATUSES, LINK_STATUSES, PUBLISH_STATUSES, ROLES, SCHOOL_ROLES } from '@wasl/shared';
 
 // Public response models only; no persistence entity is registered with Swagger.
 export class SchoolResponse {
@@ -38,6 +38,8 @@ export class SectionResponse extends AcademicBase { @ApiProperty({ format: 'uuid
 export class SubjectResponse extends AcademicBase { @ApiProperty() nameAr: string; @ApiProperty() nameEn: string; @ApiProperty({ type: String, nullable: true }) code: string | null; }
 export class AssignmentResponse extends AcademicBase { @ApiProperty({ format: 'uuid' }) sectionId: string; @ApiProperty({ format: 'uuid' }) subjectId: string; @ApiProperty({ format: 'uuid', type: String, nullable: true }) teacherId: string | null; }
 export class EnrollmentResponse extends AcademicBase { @ApiProperty({ format: 'uuid' }) sectionId: string; @ApiProperty({ format: 'uuid' }) studentId: string; @ApiProperty({ enum: [...ENROLLMENT_STATUSES] }) status: string; @ApiProperty({ format: 'date-time' }) createdAt: string; }
+export class UnitResponse extends AcademicBase { @ApiProperty({ format: 'uuid' }) sectionSubjectId: string; @ApiProperty() title: string; @ApiProperty() order: number; }
+export class LessonResponse extends AcademicBase { @ApiProperty({ format: 'uuid' }) unitId: string; @ApiProperty() title: string; @ApiProperty({ type: String, nullable: true }) body: string | null; @ApiProperty() order: number; @ApiProperty({ enum: [...PUBLISH_STATUSES] }) status: string; @ApiProperty({ type: String, nullable: true, format: 'date-time' }) publishedAt: string | null; }
 export class LinkResponse extends AcademicBase { @ApiProperty({ format: 'uuid' }) parentId: string; @ApiProperty({ format: 'uuid' }) studentId: string; @ApiProperty({ enum: [...LINK_STATUSES] }) status: string; @ApiProperty({ type: String, nullable: true, format: 'date-time' }) verifiedAt: string | null; @ApiProperty({ format: 'date-time' }) createdAt: string; }
 export class NamedPersonResponse { @ApiProperty({ format: 'uuid' }) id: string; @ApiProperty() fullName: string; }
 export class ClassResponse {

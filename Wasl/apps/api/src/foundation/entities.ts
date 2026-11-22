@@ -13,5 +13,8 @@ export interface Section { id: string; schoolId: string; gradeId: string; academ
 export interface Subject { id: string; schoolId: string; nameAr: string; nameEn: string; code: string | null }
 export interface SectionSubject { id: string; schoolId: string; sectionId: string; subjectId: string; teacherId: string | null }
 export interface Enrollment { id: string; schoolId: string; sectionId: string; studentId: string; status: EnrollmentStatus; createdAt: Date }
+export interface Unit { id: string; schoolId: string; sectionSubjectId: string; title: string; order: number }
+export type PublishStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+export interface Lesson { id: string; schoolId: string; unitId: string; title: string; body: string | null; order: number; status: PublishStatus; publishedAt: Date | null }
 export interface AcademicMap { academicYears: AcademicYear; semesters: Semester; grades: Grade; sections: Section; subjects: Subject; sectionSubjects: SectionSubject; enrollments: Enrollment }
 export type AcademicKind = keyof AcademicMap;

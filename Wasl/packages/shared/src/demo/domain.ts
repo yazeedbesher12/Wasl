@@ -244,7 +244,10 @@ export function execute(source: Snapshot, session: Session, command: Command): {
       const email = input.values.email?.trim().toLowerCase();
       let person = input.values.userId ? get(s, "users", input.values.userId) : email ? s.records.users.find(u => same(u.values.email, email)) : undefined;
       if (!person && !email) fail("required", "email");
-      if (person && s.records.memberships.some(m => m.id !== id && m.schoolId === school.id && m.values.userId === person.id && m.values.role === input.values.role)) fail("duplicate");
+      if (person) {
+        const personId = person.id;
+        if (s.records.memberships.some(m => m.id !== id && m.schoolId === school.id && m.values.userId === personId && m.values.role === input.values.role)) fail("duplicate");
+      }
       if (!person) { person = { id: uid(), schoolId: "", active: true, name: input.name.trim(), nameAr: input.nameAr.trim(), values: { email: email! } }; s.records.users.push(person); }
       else if (previous?.values.userId === person.id && input.name.trim() && input.nameAr.trim()) {
         person.name = input.name.trim(); person.nameAr = input.nameAr.trim();

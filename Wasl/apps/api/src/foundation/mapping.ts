@@ -1,5 +1,5 @@
 import type { AcademicDtoMap, AcademicKind as ApiAcademicKind, ParentLinkDto, SchoolDto, SchoolMembershipDto, UserDto } from '@wasl/shared';
-import type { AcademicMap, Membership, ParentLink, Person, School } from './entities';
+import type { AcademicMap, Lesson, Membership, ParentLink, Person, School, Unit } from './entities';
 export const schoolDto = (s: School): SchoolDto => ({ id: s.id, name: s.name, nameAr: s.nameAr, locale: s.locale, active: s.active, createdAt: s.createdAt.toISOString() });
 export const userDto = (u: Person): UserDto => ({ id: u.id, email: u.email, fullName: u.fullName, preferredLanguage: u.preferredLanguage, active: u.active, createdAt: u.createdAt.toISOString() });
 export const memberDto = (m: Membership): SchoolMembershipDto => {
@@ -7,6 +7,8 @@ export const memberDto = (m: Membership): SchoolMembershipDto => {
   return { id: m.id, userId: m.userId, schoolId: m.schoolId, role: m.role, active: m.active, createdAt: m.createdAt.toISOString() };
 };
 export const linkDto = (l: ParentLink): ParentLinkDto => ({ id: l.id, schoolId: l.schoolId, parentId: l.parentId, studentId: l.studentId, status: l.status, verifiedAt: l.verifiedAt?.toISOString() ?? null, createdAt: l.createdAt.toISOString() });
+export const unitDto = (u: Unit) => ({ id: u.id, schoolId: u.schoolId, sectionSubjectId: u.sectionSubjectId, title: u.title, order: u.order });
+export const lessonDto = (l: Lesson) => ({ id: l.id, schoolId: l.schoolId, unitId: l.unitId, title: l.title, body: l.body, order: l.order, status: l.status, publishedAt: l.publishedAt?.toISOString() ?? null });
 export function academicDto<K extends ApiAcademicKind>(kind: K, row: AcademicMap[K]): AcademicDtoMap[K] {
   const base = { id: row.id, schoolId: row.schoolId };
   const map = {
