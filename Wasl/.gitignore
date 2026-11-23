@@ -20,3 +20,6 @@ next-env.d.ts
 
 # Private development object bytes
 .wasl-data/
+
+# Temporary integration logs/screenshots
+.verification/

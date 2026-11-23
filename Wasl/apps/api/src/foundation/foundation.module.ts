@@ -1,3 +1,5 @@
+import { ParentLearningController } from './parent-learning.controller';
+import { ParentLearningService } from './parent-learning.service';
 import { AnnouncementsController, NotificationsController } from './communication.controllers';
 import { CommunicationService } from './communication.service';
 import { AssessmentsController, SubmissionsController, ResultsController } from './assessment.controllers';
@@ -9,5 +11,5 @@ import { LessonsController, UnitsController } from './content.controllers';
 import { ContentService } from './content.service';
 import { QuestionBanksController, QuestionsController, ResourcesController, StudentQuestionsController } from './learning.controllers';
 import { LearningService } from './learning.service';
-@Module({ controllers: [...foundationControllers, UnitsController, LessonsController, ResourcesController, QuestionBanksController, QuestionsController, StudentQuestionsController, AssessmentsController, SubmissionsController, ResultsController, AnnouncementsController, NotificationsController], providers: [FoundationService, ContentService, LearningService, AssessmentService, CommunicationService] })
+@Module({ controllers: [...foundationControllers, UnitsController, LessonsController, ResourcesController, QuestionBanksController, QuestionsController, StudentQuestionsController, AssessmentsController, SubmissionsController, ResultsController, AnnouncementsController, NotificationsController, ParentLearningController], providers: [FoundationService, ContentService, LearningService, AssessmentService, CommunicationService, ParentLearningService] })
 export class FoundationModule {}

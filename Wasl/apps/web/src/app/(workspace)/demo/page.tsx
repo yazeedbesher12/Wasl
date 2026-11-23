@@ -1,2 +1,3 @@
-import { DemoEntry } from "@/components/workspace/entry";
-export default function Page() { return <DemoEntry />; }
+import { redirect } from 'next/navigation';
+// Old bookmarks now enter the authenticated workspace; stored snapshots are untouched.
+export default function Page() { redirect('/login'); }

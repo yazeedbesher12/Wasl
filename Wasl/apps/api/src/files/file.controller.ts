@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Header, Param, ParseUUIDPipe, Post, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { IsString, Length } from 'class-validator';
+import { Body, Controller, Get, Header, Param, ParseUUIDPipe, Post, Query, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOkResponse, ApiProperty, ApiTags } from '@nestjs/swagger';
 import type { AuthUser } from '../auth/auth.types';
@@ -22,6 +23,7 @@ export class FileResponse {
   @ApiProperty() size: number;
   @ApiProperty({ format: 'date-time' }) createdAt: string;
 }
+class ResolveFileQuery { @ApiProperty() @IsString() @Length(1, 1000) storageKey: string; }
 @ApiTags('private files') @ApiBearerAuth() @Roles('TEACHER', 'SCHOOL_ADMIN', 'STUDENT', 'PARENT') @Controller('files')
 export class FileController {
   constructor(private service: FileService) {}
@@ -30,6 +32,7 @@ export class FileController {
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_FILE_BYTES, files: 1, fields: 3, parts: 4, fieldSize: 1024 } }))
   @Respond(FileResponse, false, true)
   upload(@CurrentUser() u: AuthUser, @Body() dto: FileUploadDto, @UploadedFile() file?: Express.Multer.File) { return this.service.upload(u, dto, file); }
+  @Get('resolve') @Respond(FileResponse) resolve(@CurrentUser() u: AuthUser, @Query() q: ResolveFileQuery) { return this.service.resolve(u, q.storageKey); }
   @Get(':id') @Respond(FileResponse) metadata(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) { return this.service.metadata(u, id); }
   @Get(':id/content') @Header('Cache-Control', 'private, no-store') @Header('X-Content-Type-Options', 'nosniff')
   @ApiOkResponse({ description: 'Authorized immutable file bytes as an attachment.', content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } } })

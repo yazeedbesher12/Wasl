@@ -4,7 +4,7 @@ import { Animated, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View
 import type { TextInputProps, TextProps } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { designTokens as c, educationMotion } from "../../../packages/shared/src/demo";
-import { useNative } from "./context";
+import { usePresentation as useNative } from "./presentation";
 import { NativeEducationArt, useEducationMotion } from "./education";
 
 

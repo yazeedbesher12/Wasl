@@ -117,6 +117,9 @@ export class WaslClient {
   myGrades(query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'>) { return this.request<Page<ReleasedResultDto>>('/me/grades' + this.query(query)); }
   childGrades(studentId: string, query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'> & { schoolId?: string }) { return this.request<Page<ReleasedResultDto>>('/parent/children/' + encodeURIComponent(studentId) + '/grades' + this.query(query)); }
   uploadFile(form: FormData) { return this.request<FileDto>('/files', { method: 'POST', body: form }); }
+  resolveFile(storageKey: string) { return this.request<FileDto>('/files/resolve' + this.query({ storageKey })); }
+  childLearning(studentId: string, schoolId?: string) { return this.request<import('./communication').ParentLearningDto>('/parent/children/' + encodeURIComponent(studentId) + '/learning' + this.query({ schoolId })); }
+  childAssessment(studentId: string, id: string, schoolId?: string) { return this.request<AssessmentDetailDto>('/parent/children/' + encodeURIComponent(studentId) + '/assessments/' + encodeURIComponent(id) + this.query({ schoolId })); }
   file(id: string) { return this.request<FileDto>('/files/' + encodeURIComponent(id)); }
   async downloadFile(id: string): Promise<Blob> {
     const token = this.getToken();

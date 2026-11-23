@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { AccessibilityInfo, Animated, AppState, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { designTokens as c, educationMotion, navigationGroup, subjectShapes, subjectTheme, welcomeShapes } from "../../../packages/shared/src/demo";
 import type { VectorShape, WelcomeTheme } from "../../../packages/shared/src/demo";
-import { useNative } from "./context";
+import { usePresentation as useNative } from "./presentation";
 
 const Motion = createContext(false);
 /** One accessibility/app lifecycle subscription for all native presentation components. */
@@ -68,7 +68,7 @@ export function NativeEducationBackground() {
     const loop = Animated.loop(Animated.sequence([Animated.timing(drift, { toValue: 10, duration: educationMotion.backgroundHalfCycle, isInteraction: false, useNativeDriver: true }), Animated.timing(drift, { toValue: 0, duration: educationMotion.backgroundHalfCycle, isInteraction: false, useNativeDriver: true })])); loop.start();
     return () => { loop.stop(); drift.setValue(0); };
   }, [enabled, drift]);
-  return <View pointerEvents="none" accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[StyleSheet.absoluteFillObject, { overflow: "hidden", opacity: .11 }]}><Animated.View style={{ position: "absolute", width: 210, height: 270, borderWidth: 1.5, borderColor: c.primary, borderRadius: 120, end: -140, top: 65, transform: [{ rotate: "-24deg" }, { translateY: drift }] }} /><View style={{ position: "absolute", width: 180, height: 230, borderWidth: 1.5, borderStyle: "dashed", borderColor: c.primary, borderRadius: 110, start: -120, bottom: 40, transform: [{ rotate: "35deg" }] }} />{[0,1,2,3].map(i => <View key={i} style={{ position: "absolute", width: 4, height: 4, backgroundColor: c.primary, borderRadius: 2, end: 13 + i * 12, top: 390 + i % 2 * 13 }} />)}</View>;
+  return <View pointerEvents="none" accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[StyleSheet.absoluteFill, { overflow: "hidden", opacity: .11 }]}><Animated.View style={{ position: "absolute", width: 210, height: 270, borderWidth: 1.5, borderColor: c.primary, borderRadius: 120, end: -140, top: 65, transform: [{ rotate: "-24deg" }, { translateY: drift }] }} /><View style={{ position: "absolute", width: 180, height: 230, borderWidth: 1.5, borderStyle: "dashed", borderColor: c.primary, borderRadius: 110, start: -120, bottom: 40, transform: [{ rotate: "35deg" }] }} />{[0,1,2,3].map(i => <View key={i} style={{ position: "absolute", width: 4, height: 4, backgroundColor: c.primary, borderRadius: 2, end: 13 + i * 12, top: 390 + i % 2 * 13 }} />)}</View>;
 }
 export function NativeReveal({ children }: { children: ReactNode }) {
   const enabled = useEducationMotion(); const entered = useRef(false); const progress = useRef(new Animated.Value(1)).current;

@@ -348,3 +348,22 @@ textarea[aria-invalid="true"] { border-color: #B33838; }
 }
 .learning-context > div { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .learning-card p { max-width: 100%; overflow-wrap: anywhere; }
+
+/* Live API views retain the existing workspace palette and components. */
+.login-page { max-width: 1120px; margin: 4vh auto; padding: 20px; }
+.workspace-content { position: relative; padding: 24px; display: grid; gap: 20px; min-width: 0; }
+.connected-workspace .form-panel label { display: grid; gap: 8px; }
+.connected-workspace .question-option { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.connected-workspace .question-option input[type=radio] { width: auto; }
+.connected-workspace .result-question { margin-block: 18px; }
+.connected-workspace .panel > .button { margin-inline-end: 12px; margin-block: 8px; }
+.connected-workspace .actions { flex-wrap: wrap; }
+.connected-workspace .topbar select { max-width: 280px; }
+@media (max-width: 760px) { .connected-workspace .sidebar { position: relative; display: block; width: 100%; } .connected-workspace { display: block; } .connected-workspace .admin-main { margin: 0; } .connected-workspace .sidebar nav { display: flex; flex-wrap: wrap; } .connected-workspace .topbar { flex-wrap: wrap; height: auto; gap: 12px; } .workspace-content { padding: 12px; } .login-page { margin: 0; } }
+
+.connected-workspace .live-mobile-nav { display: none; }
+@media (max-width: 900px) {
+  .connected-workspace .live-mobile-nav { display: grid; flex: 1; min-width: 180px; }
+  .connected-workspace .topbar { height: auto; flex-wrap: wrap; padding: 16px; gap: 12px; }
+  .connected-workspace .topbar > .actions { width: 100%; }
+}

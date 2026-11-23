@@ -13,3 +13,5 @@ export type NotificationType = typeof NOTIFICATION_TYPES[number];
 export interface NotificationPayload { entityId: string; sectionSubjectId: string | null; studentId?: string }
 export interface NotificationDto { id: string; schoolId: string; type: NotificationType; payload: NotificationPayload; title: string; titleAr: string; readAt: string | null; createdAt: string }
 export type NotificationQuery = Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'> & { read?: 'all' | 'read' | 'unread' };
+
+export interface ParentLearningDto { units: import('./foundation').UnitDto[]; lessons: import('./foundation').LessonDto[]; resources: import('./foundation').ResourceDto[]; assessments: import('./assessment').AssessmentDto[]; announcements: AnnouncementDto[] }

@@ -1,3 +1,8 @@
+Latest frontend update: web and native default entry points use the real API.
+Start with [frontend integration](docs/frontend-api-integration.md). The following
+scaffold/demo-only instructions are historical; PostgreSQL/S3 deployment remains
+outstanding. Work directly on `main`, as requested by the project owner.
+
 # Handoff prompt for the coding agent
 
 Latest update: actual authenticated files (local development or private S3/MinIO),

@@ -1,3 +1,2 @@
-import { SchoolForm } from "@/components/admin/school-form";
-
-export default function AddSchoolPage() { return <SchoolForm />; }
+import { ApiWorkspace } from "@/components/connected/workspace";
+export default function Page() { return <ApiWorkspace role="admin" path={["schools", "new"]} />; }

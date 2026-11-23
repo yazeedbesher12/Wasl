@@ -1,3 +1,4 @@
+import { ConnectedApp } from './src/connected/app';
 import { StatusBar } from 'expo-status-bar';
 import { I18nManager, KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -49,4 +50,6 @@ function NativeApp() {
     {identity && route.page !== 'entry' && <View style={styles.tabs}>{tabs.map(page => <Pressable key={page} accessibilityRole="tab" accessibilityState={{ selected: page === route.page, disabled: n.busy }} disabled={n.busy} onPress={() => go({ page })} style={[styles.tab, page === route.page && styles.selectedTab]}><NativeNavIcon page={page} selected={page === route.page} /><Txt style={{ textAlign: 'center', fontSize: 11, fontWeight: '600', color: page === route.page ? '#FFFFFF' : '#BCD0EF', marginTop: 5 }}>{t(page === 'results' && ['student', 'parent'].includes(identity.role) ? 'releasedResults' : page)}</Txt></Pressable>)}</View>}
   </SafeAreaView>;
 }
-export default function App() { return <SafeAreaProvider><NativeProvider><EducationMotionProvider><NativeApp /></EducationMotionProvider></NativeProvider></SafeAreaProvider>; }
+export function DemoApp() { return <SafeAreaProvider><NativeProvider><EducationMotionProvider><NativeApp /></EducationMotionProvider></NativeProvider></SafeAreaProvider>; }
+
+export default function App() { return process.env.EXPO_PUBLIC_WASL_MODE === 'demo' ? <DemoApp /> : <SafeAreaProvider><EducationMotionProvider><ConnectedApp /></EducationMotionProvider></SafeAreaProvider>; }

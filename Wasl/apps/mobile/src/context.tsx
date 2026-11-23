@@ -79,3 +79,5 @@ function useNativeState() {
 const Context = createContext<ReturnType<typeof useNativeState> | null>(null);
 export function NativeProvider({ children }: { children: ReactNode }) { const value = useNativeState(); return <Context.Provider value={value}>{children}</Context.Provider>; }
 export function useNative() { const value = useContext(Context); if (!value) throw new Error("NativeProvider required"); return value; }
+
+export function useNativeOptional() { return useContext(Context); }

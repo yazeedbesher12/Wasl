@@ -1,3 +1,4 @@
+import { ApiSessionProvider } from "@/components/connected/session";
 import type { Metadata } from "next";
 import "./globals.css";
 import "./education.css";
@@ -14,7 +15,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ar" dir="rtl" suppressHydrationWarning>
-      <body>{children}</body>
+      <body><ApiSessionProvider>{children}</ApiSessionProvider></body>
     </html>
   );
 }

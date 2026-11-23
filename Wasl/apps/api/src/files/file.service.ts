@@ -46,6 +46,7 @@ export class FileService {
       throw error;
     }
   }
+  resolve(actor: AuthUser, key: string) { return this.scope(actor, async r => { const f = await r.files.byKey(key); if (!f) throw new NotFoundException('File not found'); await authorizeFile(r, actor, f); return fileDto(f); }); }
   metadata(actor: AuthUser, id: string) {
     return this.scope(actor, async r => { const f = await r.files.get(id); if (!f) throw new NotFoundException('File not found'); await authorizeFile(r, actor, f); return fileDto(f); });
   }
