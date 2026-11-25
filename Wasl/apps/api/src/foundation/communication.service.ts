@@ -24,10 +24,10 @@ const notificationDto = (n: Notification): NotificationDto => ({ id: n.id, schoo
 @Injectable()
 export class CommunicationService {
   constructor(@Inject(STORAGE) private storage: FoundationStorage) {}
-  private school<T>(actor: AuthUser, allowed: readonly Role[], work: (r: Repositories) => Promise<T>) {
+  private school<T>(actor: AuthUser, allowed: readonly Role[], work: (r: Repositories) => Promise<T>, announcementWrite = false) {
     if (!actor.schoolId) throw new ForbiddenException('An active school role is required');
     return this.storage.run({ kind: 'school', userId: actor.sub, schoolId: actor.schoolId,
-      assessment: { membershipId: actor.membershipId, operation: 'metadata', targetId: actor.sub } },
+      assessment: { membershipId: actor.membershipId, operation: announcementWrite ? 'announcement-write' : 'metadata', targetId: actor.sub } },
     async r => { await requireActor(r, actor, allowed); return work(r); });
   }
   private async writableClass(r: Repositories, actor: AuthUser, id: string | null) {
@@ -58,14 +58,14 @@ export class CommunicationService {
     return this.school(actor, ['TEACHER', 'SCHOOL_ADMIN'], async r => {
       await this.writableClass(r, actor, input.sectionSubjectId ?? null);
       return announcementDto(await r.communication.createAnnouncement({ id: randomUUID(), schoolId: actor.schoolId!, authorId: actor.sub, sectionSubjectId: input.sectionSubjectId ?? null, title: input.title, body: input.body, status: 'DRAFT', publishedAt: null, createdAt: new Date() }));
-    });
+    }, true);
   }
   update(actor: AuthUser, id: string, input: UpdateAnnouncementDto) {
     return this.school(actor, ['TEACHER', 'SCHOOL_ADMIN'], async r => {
       const a = await this.writable(r, actor, id);
       if (a.status !== 'DRAFT') throw new ConflictException('Only draft announcements can be edited');
       return announcementDto(await r.communication.updateAnnouncement({ ...a, title: input.title ?? a.title, body: input.body ?? a.body }));
-    });
+    }, true);
   }
   transition(actor: AuthUser, id: string, action: 'publish' | 'archive') {
     return this.school(actor, ['TEACHER', 'SCHOOL_ADMIN'], async r => {
@@ -84,7 +84,7 @@ export class CommunicationService {
       }
       await notify(r, a.schoolId, 'ANNOUNCEMENT_PUBLISHED', recipients.filter(v => v.userId !== actor.sub), { entityId: id, sectionSubjectId: a.sectionSubjectId });
       return announcementDto(updated);
-    });
+    }, true);
   }
   private async visibleNotifications(r: Repositories, actor: AuthUser) {
     const rows: Notification[] = [];

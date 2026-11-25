@@ -18,11 +18,11 @@ const notFound = () => new NotFoundException('Record not found');
 export class LearningService {
   constructor(@Inject(STORAGE) private storage: FoundationStorage) {}
 
-  private school<T>(actor: AuthUser, roles: readonly ('SCHOOL_ADMIN' | 'TEACHER' | 'STUDENT')[], work: (repositories: Repositories) => Promise<T>, assessment?: 'read' | 'staff-read' | 'staff-write') {
+  private school<T>(actor: AuthUser, roles: readonly ('SCHOOL_ADMIN' | 'TEACHER' | 'STUDENT')[], work: (repositories: Repositories) => Promise<T>, assessment?: 'read' | 'content-write' | 'staff-read' | 'staff-write') {
     if (!actor.schoolId) throw new ForbiddenException('An active school role is required');
     const kind = assessment === 'staff-read' || assessment === 'staff-write' ? 'assessment-staff' : 'school';
     return this.storage.run({ kind, userId: actor.sub, schoolId: actor.schoolId,
-      assessment: assessment && { membershipId: actor.membershipId, operation: assessment, targetId: actor.sub },
+      assessment: { membershipId: actor.membershipId, operation: assessment ?? 'read', targetId: actor.sub },
       subjects: { membershipId: actor.membershipId, access: { operation: 'read' } } }, async repositories => {
       await requireActor(repositories, actor, roles);
       return work(repositories);
@@ -125,7 +125,7 @@ export class LearningService {
       this.validateResource(input.type, storageKey, url);
       if (input.type === 'FILE') await requireLessonFile(repositories, actor, storageKey!, input.lessonId ?? null);
       return resourceDto(await repositories.content.createResource({ id: randomUUID(), schoolId: actor.schoolId!, lessonId: input.lessonId ?? null, type: input.type, title: input.title, storageKey, url, offlineAllowed: input.offlineAllowed ?? false, createdAt: new Date() }));
-    });
+    }, 'content-write');
   }
 
   updateResource(actor: AuthUser, id: string, input: UpdateResourceDto): Promise<ResourceDto> {
@@ -143,7 +143,7 @@ export class LearningService {
       this.validateResource(type, storageKey, url);
       if (type === 'FILE') await requireLessonFile(repositories, actor, storageKey!, lessonId);
       return resourceDto(await repositories.content.updateResource({ ...old, lessonId, type, title: input.title ?? old.title, storageKey, url, offlineAllowed: input.offlineAllowed ?? old.offlineAllowed }));
-    });
+    }, 'content-write');
   }
 
   private async accessibleSubjectIds(repositories: Repositories, actor: AuthUser): Promise<Set<string>> {

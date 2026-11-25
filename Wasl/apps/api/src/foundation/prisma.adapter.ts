@@ -58,19 +58,23 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
     const tables: { [K in AcademicKind]: AcademicTable<AcademicMap[K]> } = {
       academicYears: {
         list: () => tx.academicYear.findMany({ where }), get: id => tx.academicYear.findFirst({ where: { id, schoolId } }),
-        create: data => tx.academicYear.create({ data }), update: data => tx.academicYear.update({ where: { id: data.id, schoolId }, data }),
+        create: data => tx.academicYear.create({ data }),
+        update: ({ id, name, startDate, endDate, archived }) => tx.academicYear.update({ where: { id, schoolId }, data: { name, startDate, endDate, archived } }),
       },
       semesters: {
         list: () => tx.semester.findMany({ where }), get: id => tx.semester.findFirst({ where: { id, schoolId } }),
-        create: data => tx.semester.create({ data }), update: data => tx.semester.update({ where: { id: data.id, schoolId }, data }),
+        create: data => tx.semester.create({ data }),
+        update: ({ id, name, startDate, endDate }) => tx.semester.update({ where: { id, schoolId }, data: { name, startDate, endDate } }),
       },
       grades: {
         list: () => tx.grade.findMany({ where }), get: id => tx.grade.findFirst({ where: { id, schoolId } }),
-        create: data => tx.grade.create({ data }), update: data => tx.grade.update({ where: { id: data.id, schoolId }, data }),
+        create: data => tx.grade.create({ data }),
+        update: ({ id, name, level }) => tx.grade.update({ where: { id, schoolId }, data: { name, level } }),
       },
       sections: {
         list: () => tx.section.findMany({ where }), get: id => tx.section.findFirst({ where: { id, schoolId } }),
-        create: data => tx.section.create({ data }), update: data => tx.section.update({ where: { id: data.id, schoolId }, data }),
+        create: data => tx.section.create({ data }),
+        update: ({ id, name }) => tx.section.update({ where: { id, schoolId }, data: { name } }),
       },
       subjects: {
         list: () => tx.subject.findMany({ where }), get: id => tx.subject.findFirst({ where: { id, schoolId } }),
@@ -79,11 +83,13 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
       },
       sectionSubjects: {
         list: () => tx.sectionSubject.findMany({ where }), get: id => tx.sectionSubject.findFirst({ where: { id, schoolId } }),
-        create: data => tx.sectionSubject.create({ data }), update: data => tx.sectionSubject.update({ where: { id: data.id, schoolId }, data }),
+        create: data => tx.sectionSubject.create({ data }),
+        update: ({ id, teacherId }) => tx.sectionSubject.update({ where: { id, schoolId }, data: { teacherId } }),
       },
       enrollments: {
         list: () => tx.enrollment.findMany({ where }), get: id => tx.enrollment.findFirst({ where: { id, schoolId } }),
-        create: data => tx.enrollment.create({ data }), update: data => tx.enrollment.update({ where: { id: data.id, schoolId }, data }),
+        create: data => tx.enrollment.create({ data }),
+        update: ({ id, status }) => tx.enrollment.update({ where: { id, schoolId }, data: { status } }),
       },
     };
     const table = <K extends AcademicKind>(kind: K): AcademicTable<AcademicMap[K]> => tables[kind];
@@ -143,15 +149,27 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
         listUnits: () => tx.unit.findMany({ where }),
         getUnit: id => tx.unit.findFirst({ where: { id, schoolId } }),
         createUnit: data => { scoped(data); return tx.unit.create({ data }); },
-        updateUnit: data => { scoped(data); return tx.unit.update({ where: { id: data.id, schoolId }, data }); },
+        updateUnit: row => {
+          scoped(row);
+          const { id, title, order } = row;
+          return tx.unit.update({ where: { id, schoolId }, data: { title, order } });
+        },
         listLessons: () => tx.lesson.findMany({ where }),
         getLesson: id => tx.lesson.findFirst({ where: { id, schoolId } }),
         createLesson: data => { scoped(data); return tx.lesson.create({ data }); },
-        updateLesson: data => { scoped(data); return tx.lesson.update({ where: { id: data.id, schoolId }, data }); },
+        updateLesson: row => {
+          scoped(row);
+          const { id, title, body, order, status, publishedAt } = row;
+          return tx.lesson.update({ where: { id, schoolId }, data: { title, body, order, status, publishedAt } });
+        },
         listResources: () => tx.resource.findMany({ where }),
         getResource: id => tx.resource.findFirst({ where: { id, schoolId } }),
         createResource: data => { scoped(data); return tx.resource.create({ data }); },
-        updateResource: data => { scoped(data); return tx.resource.update({ where: { id: data.id, schoolId }, data }); },
+        updateResource: row => {
+          scoped(row);
+          const { id, lessonId, type, title, storageKey, url, offlineAllowed } = row;
+          return tx.resource.update({ where: { id, schoolId }, data: { lessonId, type, title, storageKey, url, offlineAllowed } });
+        },
       },
       questions: {
         listBanks: () => tx.questionBank.findMany({ where }),
@@ -200,7 +218,7 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
         forParent: parentId => parentId === scope.userId ? tx.parentStudentLink.findMany({ where: { parentId, status: 'VERIFIED', ...(scope.kind === 'parent-list' ? {} : where) } }) : Promise.resolve([]),
         get: id => tx.parentStudentLink.findFirst({ where: { ...where, id } }),
         create: data => { scoped(data); return tx.parentStudentLink.create({ data }); },
-        update: data => { scoped(data); return tx.parentStudentLink.update({ where: { id: data.id, schoolId }, data }); },
+        update: data => { scoped(data); return tx.parentStudentLink.update({ where: { id: data.id, schoolId }, data: { status: data.status, verifiedAt: data.verifiedAt } }); },
       },
     };
   }

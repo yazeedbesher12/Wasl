@@ -7,6 +7,9 @@ const { PrismaStorage } = require('../src/foundation/prisma.adapter');
 const { FoundationService } = require('../src/foundation/foundation.service');
 const { LearningService } = require('../src/foundation/learning.service');
 const { AssessmentService } = require('../src/foundation/assessment.service');
+const { ContentService } = require('../src/foundation/content.service');
+const { CommunicationService } = require('../src/foundation/communication.service');
+const { FileService } = require('../src/files/file.service');
 
 const roles = { tenant: 'wasl_tenant', auth: 'wasl_auth', platform: 'wasl_platform', academicAdmin: 'wasl_academic_admin', assessmentStaff: 'wasl_assessment_staff' };
 const denied = e => e.meta?.code === '42501';
@@ -44,13 +47,20 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
   }
   const db = clients.tenant;
   const other = client(urls.tenant);
-  const [platform] = await db.$queryRaw`SELECT m.id AS "membershipId", m.user_id AS sub, u.email, 'PLATFORM_ADMIN' AS role,
+  const [platform] = await clients.platform.$queryRaw`SELECT m.id AS "membershipId", m.user_id AS sub, u.email, 'PLATFORM_ADMIN' AS role,
     NULL::uuid AS "schoolId" FROM public.memberships m JOIN public.users u ON u.id = m.user_id WHERE m.role = 'PLATFORM_ADMIN' LIMIT 1`;
   const storage = await PrismaStorage.open(urls, key);
   t.after(() => storage.onModuleDestroy());
   const foundation = new FoundationService(storage);
   const learning = new LearningService(storage);
   const grading = new AssessmentService(storage);
+  const content = new ContentService(storage);
+  const communication = new CommunicationService(storage);
+  function temporaryFiles() {
+    const objects = new Map();
+    return new FileService(storage, { driver: 'local', put: async (key, bytes) => objects.set(key, bytes),
+      get: async key => objects.get(key), remove: async key => objects.delete(key) });
+  }
   const password = randomUUID();
   const email = () => `fictional-${randomUUID()}@wasl.test`;
   const actor = ({ user, membership }) => ({ sub: user.id, email: user.email, role: membership.role, schoolId: membership.schoolId, membershipId: membership.id });
@@ -71,8 +81,9 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
     const subject = await foundation.saveAcademic(admin, 'subjects', { nameEn: 'Fictional Subject', nameAr: 'Fictional Subject' });
     const unassigned = await foundation.saveAcademic(admin, 'subjects', { nameEn: 'Unassigned Subject', nameAr: 'Unassigned Subject' });
     const assignment = await foundation.saveAcademic(admin, 'sectionSubjects', { sectionId: section.id, subjectId: subject.id, teacherId: teacher.sub });
-    await foundation.saveAcademic(admin, 'enrollments', { sectionId: section.id, studentId: student.sub });
-    await foundation.saveAcademic(admin, 'enrollments', { sectionId: section.id, studentId: peer.sub });
+    const enrollment = await foundation.saveAcademic(admin, 'enrollments', { sectionId: section.id, studentId: student.sub });
+    const peerEnrollment = await foundation.saveAcademic(admin, 'enrollments', { sectionId: section.id, studentId: peer.sub });
+    const semester = await foundation.saveAcademic(admin, 'semesters', { academicYearId: year.id, name: 'Fictional Semester', startDate: '2026-01-01', endDate: '2026-07-01' });
     const bank = await learning.createQuestionBank(teacher, { subjectId: subject.id, name: 'Fictional Bank' });
     const choice = await learning.createQuestion(teacher, bank.id, { type: 'MULTIPLE_CHOICE', text: 'Fictional prompt', points: 3,
       options: [{ text: 'Alpha', isCorrect: true }, { text: 'Beta', isCorrect: false }] });
@@ -81,7 +92,7 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
     const assessment = await grading.create(teacher, { sectionSubjectId: assignment.id, type: 'ASSIGNMENT', title: 'Fictional work' });
     await grading.replaceQuestions(teacher, assessment.id, { questions: [{ questionId: choice.id, order: 0 }, { questionId: short.id, order: 1 }] });
     await grading.publish(teacher, assessment.id);
-    return { school, admin, teacher, unassignedTeacher, student, peer, parent, link, assignment, unassigned, choice, short, assessment };
+    return { school, admin, teacher, unassignedTeacher, student, peer, parent, link, year, semester, grade, section, enrollment, peerEnrollment, assignment, unassigned, choice, short, assessment };
   }
   const a = await fixtures('Fictional Alpha');
   const b = await fixtures('Fictional Beta');
@@ -96,6 +107,184 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
       options.actor ?? who.sub, who.membershipId, options.school ?? who.schoolId, `assessment:${operation}`, target]);
     return { payload, tag: createHmac('sha256', key).update(payload).digest('hex') };
   }
+
+  await t.test('academic reads follow verified assignments, enrollments and parent links', async () => {
+    const read = tx => tx.$queryRaw`SELECT e.id FROM public.enrollments e JOIN public.sections s ON s.id = e.section_id
+      JOIN public.grades g ON g.id = s.grade_id JOIN public.academic_years y ON y.id = s.academic_year_id
+      JOIN public.semesters sem ON sem.academic_year_id = y.id WHERE sem.id IN (${a.semester.id}::uuid, ${b.semester.id}::uuid) ORDER BY e.id`;
+    assert.deepEqual(await read(db), []);
+    assert.deepEqual(await db.$queryRaw`SELECT id FROM public.memberships`, []);
+    await db.$transaction(async tx => {
+      await tx.$queryRaw`SELECT set_config('app.school_id', ${a.school.id}, true), set_config('app.user_id', ${a.student.sub}, true), set_config('app.bypass_rls', 'on', true)`;
+      assert.deepEqual(await read(tx), []);
+      await install(tx, await proof(tx, a.student, a.student.sub, 'read', { expires: Date.now() - 5000 }));
+      assert.deepEqual(await read(tx), []);
+      const valid = await proof(tx, a.student, a.student.sub, 'read');
+      await install(tx, valid);
+      assert.deepEqual(await read(tx), [{ id: a.enrollment.id }]);
+      assert.deepEqual(await tx.$queryRaw`SELECT id FROM public.memberships WHERE role = 'STUDENT'`, [{ id: a.student.membershipId }]);
+      assert.deepEqual(await tx.$queryRaw`SELECT id FROM public.section_subjects`, [{ id: a.assignment.id }]);
+      await other.$transaction(async second => { await install(second, valid); assert.deepEqual(await read(second), []); });
+      await install(tx, await proof(tx, a.unassignedTeacher, a.unassignedTeacher.sub, 'read'));
+      assert.deepEqual(await read(tx), []);
+      await install(tx, await proof(tx, a.parent, a.student.sub, 'read'));
+      assert.deepEqual(await read(tx), [{ id: a.enrollment.id }]);
+      await install(tx, await proof(tx, a.parent, a.peer.sub, 'read'));
+      assert.deepEqual(await read(tx), []);
+    });
+    const readAssignments = who => db.$transaction(async tx => {
+      await install(tx, await proof(tx, who, who.sub, 'read'));
+      return tx.$queryRaw`SELECT id FROM public.section_subjects WHERE id = ${a.assignment.id}::uuid`;
+    });
+    await foundation.saveAcademic(a.admin, 'sectionSubjects', { teacherId: null }, a.assignment.id);
+    assert.deepEqual(await readAssignments(a.teacher), []);
+    await foundation.saveAcademic(a.admin, 'sectionSubjects', { teacherId: a.teacher.sub }, a.assignment.id);
+    await foundation.saveAcademic(a.admin, 'enrollments', { status: 'WITHDRAWN' }, a.enrollment.id);
+    assert.deepEqual(await readAssignments(a.student), []);
+    await foundation.saveAcademic(a.admin, 'enrollments', { status: 'ACTIVE' }, a.enrollment.id);
+  });
+
+  await t.test('academic writes require administrator proof, immutable school and same-school references', async () => {
+    const academic = clients.academicAdmin;
+    const code = expected => error => error.meta?.code === expected;
+    const write = (fn) => academic.$transaction(async tx => {
+      await install(tx, await proof(tx, a.admin, a.admin.sub, 'academic-write'));
+      return fn(tx);
+    });
+    await assert.rejects(academic.$executeRaw`UPDATE public.grades SET school_id = ${b.school.id}::uuid WHERE id = ${a.grade.id}::uuid`, denied);
+    await assert.rejects(write(tx => tx.$executeRaw`DELETE FROM public.sections WHERE id = ${b.section.id}::uuid`), denied);
+    await assert.rejects(write(tx => tx.$executeRaw`INSERT INTO public.grades (id, school_id, name, level)
+      VALUES (${randomUUID()}::uuid, ${b.school.id}::uuid, 'Foreign', 52)`), denied);
+    assert.equal(await write(tx => tx.$executeRaw`UPDATE public.grades SET name = 'Foreign' WHERE id = ${b.grade.id}::uuid`), 0);
+    await assert.rejects(write(tx => tx.$executeRaw`INSERT INTO public.sections (id, school_id, grade_id, academic_year_id, name)
+      VALUES (${randomUUID()}::uuid, ${a.school.id}::uuid, ${b.grade.id}::uuid, ${a.year.id}::uuid, 'Foreign grade section')`), code('23503'));
+    await assert.rejects(write(tx => tx.$executeRaw`UPDATE public.section_subjects SET teacher_id = ${b.teacher.sub}::uuid WHERE id = ${a.assignment.id}::uuid`), denied);
+    const rollback = new Error('Fictional academic rollback');
+    await assert.rejects(write(async tx => {
+      assert.equal(await tx.$executeRaw`UPDATE public.academic_years SET archived = true WHERE id = ${a.year.id}::uuid`, 1);
+      throw rollback;
+    }), error => error === rollback);
+    await foundation.saveAcademic(a.admin, 'academicYears', { archived: true }, a.year.id);
+    await assert.rejects(write(tx => tx.$executeRaw`INSERT INTO public.sections (id, school_id, grade_id, academic_year_id, name)
+      VALUES (${randomUUID()}::uuid, ${a.school.id}::uuid, ${a.grade.id}::uuid, ${a.year.id}::uuid, 'Archived year section')`), denied);
+    await foundation.saveAcademic(a.admin, 'academicYears', { archived: false }, a.year.id);
+  });
+
+  await t.test('learning content follows verified assignment, publication and relationship scope', async () => {
+    const unit = await content.createUnit(a.teacher, { sectionSubjectId: a.assignment.id, title: 'Fictional Unit' });
+    const lesson = await content.createLesson(a.teacher, { unitId: unit.id, title: 'Fictional Lesson' });
+    const resource = await learning.createResource(a.teacher, { lessonId: lesson.id, type: 'LINK', title: 'Fictional Resource', url: 'https://example.test/lesson' });
+    const read = tx => tx.$queryRaw`SELECT r.id FROM public.resources r JOIN public.lessons l ON l.id = r.lesson_id
+      JOIN public.units u ON u.id = l.unit_id WHERE r.id = ${resource.id}::uuid AND u.id = ${unit.id}::uuid`;
+    const scoped = (actor, target, operation, work) => db.$transaction(async tx => {
+      await install(tx, await proof(tx, actor, target, operation));
+      return work(tx);
+    });
+    assert.deepEqual(await read(db), []);
+    assert.deepEqual(await scoped(a.student, a.student.sub, 'read', read), []);
+    assert.deepEqual(await scoped(a.unassignedTeacher, a.unassignedTeacher.sub, 'read', read), []);
+    assert.deepEqual(await scoped(a.teacher, a.teacher.sub, 'read', read), [{ id: resource.id }]);
+    assert.equal(await scoped(a.teacher, a.teacher.sub, 'read', tx => tx.$executeRaw`UPDATE public.units SET title = 'No' WHERE id = ${unit.id}::uuid`), 0);
+    await assert.rejects(scoped(a.teacher, a.teacher.sub, 'content-write', tx => tx.$executeRaw`INSERT INTO public.units (id,school_id,section_subject_id,title)
+      VALUES (${randomUUID()}::uuid,${a.school.id}::uuid,${b.assignment.id}::uuid,'Foreign class')`), denied);
+    await assert.rejects(scoped(a.teacher, a.teacher.sub, 'content-write', tx => tx.$executeRaw`UPDATE public.lessons SET school_id = ${b.school.id}::uuid WHERE id = ${lesson.id}::uuid`), denied);
+    await content.updateLesson(a.teacher, lesson.id, { status: 'PUBLISHED' });
+    assert.deepEqual(await scoped(a.student, a.student.sub, 'read', read), [{ id: resource.id }]);
+    assert.deepEqual(await scoped(b.student, b.student.sub, 'read', read), []);
+    assert.deepEqual(await scoped(a.parent, a.peer.sub, 'read', read), []);
+    assert.deepEqual(await scoped(a.parent, a.student.sub, 'read', read), [{ id: resource.id }]);
+    await assert.rejects(scoped(a.teacher, a.teacher.sub, 'content-write', tx => tx.$executeRaw`UPDATE public.lessons SET title = 'No' WHERE id = ${lesson.id}::uuid`), denied);
+    await content.updateLesson(a.teacher, lesson.id, { status: 'ARCHIVED' });
+    assert.deepEqual(await scoped(a.student, a.student.sub, 'read', read), []);
+    await foundation.saveAcademic(a.admin, 'academicYears', { archived: true }, a.year.id);
+    await assert.rejects(scoped(a.teacher, a.teacher.sub, 'content-write', tx => tx.$executeRaw`INSERT INTO public.units (id,school_id,section_subject_id,title)
+      VALUES (${randomUUID()}::uuid,${a.school.id}::uuid,${a.assignment.id}::uuid,'Archived class')`), denied);
+    await foundation.saveAcademic(a.admin, 'academicYears', { archived: false }, a.year.id);
+  });
+
+  await t.test('files, announcement audiences and notification recipients ignore forged GUCs', async () => {
+    const files = temporaryFiles();
+    const unit = await content.createUnit(a.teacher, { sectionSubjectId: a.assignment.id, title: 'Fictional file unit' });
+    const lesson = await content.createLesson(a.teacher, { unitId: unit.id, title: 'Fictional file lesson' });
+    const bytes = Buffer.from('Fictional handout');
+    const file = await files.upload(a.teacher, { purpose: 'LESSON_RESOURCE', lessonId: lesson.id }, {
+      originalname: 'handout.txt', buffer: bytes, size: bytes.length, mimetype: 'text/plain',
+    });
+    await learning.createResource(a.teacher, { lessonId: lesson.id, type: 'FILE', title: 'Fictional handout', storageKey: file.storageKey });
+    await assert.rejects(files.download(a.student, file.id), notFound);
+    await content.updateLesson(a.teacher, lesson.id, { status: 'PUBLISHED' });
+    assert.deepEqual((await files.download(a.student, file.id)).data, bytes);
+    assert.deepEqual((await files.download(a.parent, file.id)).data, bytes);
+    await assert.rejects(files.download(b.student, file.id), notFound);
+
+    const announcement = await communication.create(a.teacher, { sectionSubjectId: a.assignment.id, title: 'Fictional notice', body: 'Fictional content' });
+    await assert.rejects(communication.get(a.student, announcement.id), notFound);
+    await communication.transition(a.teacher, announcement.id, 'publish');
+    assert.equal((await communication.get(a.student, announcement.id)).id, announcement.id);
+    await assert.rejects(communication.get(b.student, announcement.id), notFound);
+    const query = { read: 'all', page: 1, limit: 100 };
+    const notice = (await communication.notifications(a.student, query)).items.find(n => n.payload.entityId === announcement.id);
+    const peerNotice = (await communication.notifications(a.peer, query)).items.find(n => n.payload.entityId === announcement.id);
+    assert.ok(notice && peerNotice);
+    assert.ok((await communication.markRead(a.student, notice.id)).readAt);
+    await assert.rejects(communication.markRead(a.student, peerNotice.id), notFound);
+
+    const raw = async tx => ({
+      files: await tx.$queryRaw`SELECT id FROM public.file_objects WHERE id = ${file.id}::uuid`,
+      announcements: await tx.$queryRaw`SELECT id FROM public.announcements WHERE id = ${announcement.id}::uuid`,
+      notices: await tx.$queryRaw`SELECT id FROM public.notifications WHERE id IN (${notice.id}::uuid, ${peerNotice.id}::uuid)`,
+    });
+    await db.$transaction(async tx => {
+      await tx.$queryRaw`SELECT set_config('app.school_id', ${a.school.id}, true), set_config('app.user_id', ${a.student.sub}, true), set_config('app.bypass_rls', 'on', true)`;
+      assert.deepEqual(await raw(tx), { files: [], announcements: [], notices: [] });
+      await install(tx, await proof(tx, b.student, b.student.sub, 'metadata'));
+      assert.deepEqual(await raw(tx), { files: [], announcements: [], notices: [] });
+      await install(tx, await proof(tx, a.student, a.student.sub, 'metadata'));
+      assert.deepEqual(await raw(tx), { files: [{ id: file.id }], announcements: [{ id: announcement.id }], notices: [{ id: notice.id }] });
+      assert.equal(await tx.$executeRaw`UPDATE public.notifications SET read_at = CURRENT_TIMESTAMP WHERE id = ${peerNotice.id}::uuid`, 0);
+    });
+    await assert.rejects(db.$transaction(async tx => {
+      await install(tx, await proof(tx, a.student, a.student.sub, 'metadata'));
+      return tx.$executeRaw`INSERT INTO public.notifications (id, school_id, user_id, type, payload)
+        VALUES (${randomUUID()}::uuid, ${a.school.id}::uuid, ${a.peer.sub}::uuid, 'ANNOUNCEMENT_PUBLISHED',
+        ${JSON.stringify({ entityId: announcement.id, sectionSubjectId: a.assignment.id, studentId: a.peer.sub })}::jsonb)`;
+    }), denied);
+    await communication.transition(a.teacher, announcement.id, 'archive');
+    assert.ok(!(await communication.notifications(a.student, query)).items.some(n => n.id === notice.id));
+  });
+
+  await t.test('answer file metadata and bytes follow ownership, submission and parent release', async () => {
+    const files = temporaryFiles();
+    const bank = await learning.createQuestionBank(b.teacher, { subjectId: b.assignment.subjectId, name: 'Fictional File Bank' });
+    const question = await learning.createQuestion(b.teacher, bank.id, { type: 'FILE_UPLOAD', text: 'Fictional file task', points: 2 });
+    const assessment = await grading.create(b.teacher, { sectionSubjectId: b.assignment.id, type: 'ASSIGNMENT', title: 'Fictional file assessment' });
+    await grading.replaceQuestions(b.teacher, assessment.id, { questions: [{ questionId: question.id, order: 0 }] });
+    await grading.publish(b.teacher, assessment.id);
+    const bytes = Buffer.from('Fictional answer');
+    const file = await files.upload(b.student, { purpose: 'ASSESSMENT_ANSWER', assessmentId: assessment.id }, {
+      originalname: 'answer.txt', buffer: bytes, size: bytes.length, mimetype: 'text/plain',
+    });
+    assert.deepEqual((await files.download(b.student, file.id)).data, bytes);
+    await assert.rejects(files.metadata(b.peer, file.id), notFound);
+    await assert.rejects(files.metadata(b.teacher, file.id), notFound);
+    await assert.rejects(files.metadata(b.parent, file.id), notFound);
+
+    await assert.rejects(db.$transaction(async tx => {
+      await install(tx, await proof(tx, b.student, assessment.id, 'file-write'));
+      return tx.$executeRaw`INSERT INTO public.file_objects
+        (id, school_id, owner_id, purpose, assessment_id, storage_key, storage_driver, original_name, content_type, size, sha256)
+        VALUES (${randomUUID()}::uuid, ${b.school.id}::uuid, ${b.student.sub}::uuid, 'ASSESSMENT_ANSWER', ${assessment.id}::uuid,
+          '../fictional.txt', 'local', 'fictional.txt', 'text/plain', 1, ${'0'.repeat(64)})`;
+    }), denied);
+    const submitted = await grading.save(b.student, assessment.id, { answers: [{ questionId: question.id, fileKey: file.storageKey }] }, true);
+    assert.deepEqual((await files.download(b.teacher, file.id)).data, bytes);
+    await assert.rejects(files.metadata(b.parent, file.id), notFound);
+    await grading.transition(b.teacher, assessment.id, 'close');
+    await grading.grade(b.teacher, submitted.id, { answers: [{ questionId: question.id, score: 2 }] });
+    await grading.transition(b.teacher, assessment.id, 'release');
+    assert.deepEqual((await files.download(b.parent, file.id)).data, bytes);
+    await assert.rejects(files.metadata(a.parent, file.id), notFound);
+  });
 
   await t.test('learner rows require verified school, participant and publication scope', async () => {
     const draftFor = (fixture, student) => grading.save(student, fixture.assessment.id, {

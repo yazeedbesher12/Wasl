@@ -185,8 +185,34 @@ authorization and Serializable retries remain in the same execution path.
 Parent-link revocation takes effect on subsequent transactions. The database
 owner, verifier ownership boundary, and API signing process remain trusted.
 
-DB-01 remains open for other tenant data, including academic information outside
-Subjects, learning content, and the legacy file and notification policies.
+### Verified academic, content, file, and communication data
+
+The academic migration limits roster reads to enrolled students, assigned
+teachers, and the selected verified child. School admins use a separate
+academic-write proof, and foreign keys include the school ID for terms,
+sections, assignments, and enrollments. The content migration scopes units,
+lessons, and resources to the class, with published-only learner access. Staff
+content writes require an open year and an authoring proof. The file and
+communication migration replaces all three caller-set school policies with
+verified proofs. File uploads bind to an exact lesson or assessment and the
+owner's storage namespace. Notification writes verify the real event and its
+recipient, and read receipts update only the recipient's scoped row.
+
+| Prisma tables | Classification and remaining trust |
+| --- | --- |
+| `academic_years`, `semesters`, `grades`, `sections`, `section_subjects`, `enrollments`, `subjects` | Verified school and relationship scope. Academic writes use the restricted admin role. |
+| `units`, `lessons`, `resources`, `question_banks`, `questions`, `question_options` | Verified assignment, open-year authoring and publication scope. The base option table stays unavailable to learners. |
+| `assessments`, `assessment_questions`, `submissions`, `answers` | Verified subject assignment, participant and release scope. Separate column grants protect grades and keys. |
+| `parent_student_links`, `memberships` | Verified school and relationship scope for tenant-side reads. Auth and platform retain restricted identity-management paths. |
+| `file_objects`, `announcements`, `notifications` | Verified owner, audience or recipient access. The object store remains private. |
+| `refresh_tokens` | Privileged auth operations. The tenant role has no access. |
+| `users`, `schools` | Remaining DB-01 gap. Tenant profile columns and school metadata are still readable without a verified school scope. Password hash access remains restricted by DB-02. |
+
+DB-01 remains open until the profile and school metadata boundary is resolved.
+The API proof issuer, database owner and non-login verifier remain trusted.
+The composite foreign keys are enforced by additive PostgreSQL migrations.
+Check existing data for inconsistent school references before rollout so the
+new constraints can be validated without rewriting data.
 
 For local PostgreSQL choose appropriate local TLS settings. For hosted PostgreSQL,
 confirm provider TLS, network access, pool/direct endpoint and connection limits.

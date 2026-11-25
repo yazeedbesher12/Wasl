@@ -11,7 +11,7 @@ export interface StorageScope {
   userId: string | null;
   schoolId: string | null;
   subjects?: { membershipId: string; access: SubjectAccess };
-  assessment?: { membershipId: string; operation: 'draft' | 'submit' | 'results' | 'read' | 'metadata' | 'discover' | 'staff-read' | 'staff-write' | 'staff-grade'; targetId: string };
+  assessment?: { membershipId: string; operation: 'draft' | 'submit' | 'results' | 'read' | 'metadata' | 'discover' | 'staff-read' | 'staff-write' | 'staff-grade' | 'academic-write' | 'content-write' | 'file-write' | 'announcement-write'; targetId: string };
 }
 export interface IdentityRepository {
   personById(id: string): Promise<PersonProfile | null>;

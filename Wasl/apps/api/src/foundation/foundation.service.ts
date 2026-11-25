@@ -31,7 +31,9 @@ export class FoundationService {
     if (!actor.schoolId) throw new ForbiddenException('An active school role is required');
     const subjects = access && { membershipId: actor.membershipId, access };
     return this.storage.run({ kind, userId: actor.sub, schoolId: actor.schoolId, subjects,
-      assessment: linkMetadata ? { membershipId: actor.membershipId, operation: 'metadata', targetId: actor.sub } : undefined },
+      assessment: kind === 'school-administration' ? undefined : {
+        membershipId: actor.membershipId, operation: kind === 'academic-administration' ? 'academic-write' : linkMetadata ? 'metadata' : 'read', targetId: actor.sub,
+      } },
     async r => { await requireActor(r, actor, roles); return work(r); });
   }
   private platform<T>(actor: AuthUser, work: (r: Repositories) => Promise<T>, targetSchoolId: string | null = null) {
@@ -175,7 +177,7 @@ export class FoundationService {
       };
       const row = builders[kind]() as AcademicMap[K]; await this.validateAcademic(r, kind, row, !old);
       return academicDto(kind, old ? await r.academics.update(kind, row) : await r.academics.create(kind, row));
-    }, ['academicYears', 'grades', 'sections', 'sectionSubjects', 'enrollments'].includes(kind) ? 'academic-administration' : 'school', subjectAccess);
+    }, kind === 'subjects' ? 'school' : 'academic-administration', subjectAccess);
   }
   private async validateAcademic<K extends AcademicKind>(r: Repositories, kind: K, row: AcademicMap[K], create: boolean) {
     const year = async (id: string, open = false) => { const y = await r.academics.get('academicYears', id); if (!y) throw notFound(); if (open && y.archived) throw new ConflictException('Academic year is archived'); return y; };

@@ -25,16 +25,19 @@ function inspect(file: Express.Multer.File) {
 export class FileService {
   private readonly logger = new Logger(FileService.name);
   constructor(@Inject(STORAGE) private storage: FoundationStorage, @Inject(OBJECT_STORE) private objects: ObjectStore) {}
-  private scope<T>(actor: AuthUser, work: (r: Repositories) => Promise<T>, participant = actor.sub) {
+  private scope<T>(actor: AuthUser, work: (r: Repositories) => Promise<T>, participant = actor.sub, uploadTarget?: string) {
     if (!actor.schoolId) throw new ForbiddenException('An active school role is required');
     return this.storage.run({ kind: 'school', userId: actor.sub, schoolId: actor.schoolId,
-      assessment: { membershipId: actor.membershipId, operation: actor.role === 'PARENT' && participant === actor.sub ? 'metadata' : 'read', targetId: participant } },
+      assessment: { membershipId: actor.membershipId,
+        operation: uploadTarget ? 'file-write' : actor.role === 'PARENT' && participant === actor.sub ? 'metadata' : 'read',
+        targetId: uploadTarget ?? participant } },
     async r => { await requireActor(r, actor, ['TEACHER', 'SCHOOL_ADMIN', 'STUDENT', 'PARENT']); return work(r); });
   }
   async upload(actor: AuthUser, input: FileUploadDto, file?: Express.Multer.File) {
     if (!file) throw new BadRequestException('Attach one file in the file field');
     const { name, ext, mime, data } = inspect(file);
-    await this.scope(actor, r => authorizeUpload(r, actor, input));
+    const uploadTarget = input.purpose === 'LESSON_RESOURCE' ? input.lessonId : input.assessmentId;
+    await this.scope(actor, r => authorizeUpload(r, actor, input), actor.sub, uploadTarget);
     const id = randomUUID();
     const key = input.purpose === 'LESSON_RESOURCE' ? `schools/${actor.schoolId}/lessons/${input.lessonId}/files/${id}${ext}` : `schools/${actor.schoolId}/students/${actor.sub}/files/${id}${ext}`;
     const row: FileObject = { id, schoolId: actor.schoolId!, ownerId: actor.sub, purpose: input.purpose, lessonId: input.lessonId ?? null, assessmentId: input.assessmentId ?? null, storageKey: key, storageDriver: this.objects.driver, originalName: name, contentType: mime, size: data.length, sha256: createHash('sha256').update(data).digest('hex'), createdAt: new Date() };
@@ -42,7 +45,7 @@ export class FileService {
       await this.objects.put(key, data, mime);
       // Recheck current relationships/lifecycle after the external write. Retries of
       // the database transaction never repeat an object-store write.
-      return await this.scope(actor, async r => { await authorizeUpload(r, actor, input); return fileDto(await r.files.create(row)); });
+      return await this.scope(actor, async r => { await authorizeUpload(r, actor, input); return fileDto(await r.files.create(row)); }, actor.sub, uploadTarget);
     } catch (error) {
       try { await this.objects.remove(key); } catch { this.logger.warn('A failed upload left an object for maintenance cleanup'); }
       throw error;

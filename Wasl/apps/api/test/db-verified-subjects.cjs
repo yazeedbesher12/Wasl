@@ -43,7 +43,7 @@ test('Subjects proofs bind SQL authority to a verified operation and transaction
       FROM pg_catalog.pg_database WHERE datname = current_database()`;
     assert.equal(check.valid, true, 'Database identity must match the marked lab');
   }
-  const [p] = await db.$queryRaw`SELECT m.id AS "membershipId", m.user_id AS sub, u.email FROM public.memberships m
+  const [p] = await makeClient(urls.platform).$queryRaw`SELECT m.id AS "membershipId", m.user_id AS sub, u.email FROM public.memberships m
     JOIN public.users u ON u.id = m.user_id WHERE m.role = 'PLATFORM_ADMIN' AND m.active ORDER BY m.id LIMIT 1`;
   const platform = { ...p, schoolId: null, role: 'PLATFORM_ADMIN' };
   const storage = await PrismaStorage.open(urls, key);
