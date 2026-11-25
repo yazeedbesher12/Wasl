@@ -17,6 +17,7 @@ import { assessmentStatus, studentCanReadQuestions } from './assessment.policy';
 const missing = () => new NotFoundException('Record not found');
 function conflict(message: string): never { throw new ConflictException(message); }
 const readers: readonly Role[] = ['SCHOOL_ADMIN', 'TEACHER', 'STUDENT'];
+const teacherWriter: readonly Role[] = ['TEACHER'];
 
 @Injectable()
 export class AssessmentService {
@@ -25,8 +26,9 @@ export class AssessmentService {
   private school<T>(actor: AuthUser, roles: readonly Role[], work: (r: Repositories) => Promise<T>, assessment?: Omit<NonNullable<StorageScope['assessment']>, 'membershipId'>) {
     if (!actor.schoolId) throw new ForbiddenException('An active school role is required');
     const kind = actor.role === 'TEACHER' || actor.role === 'SCHOOL_ADMIN' ? 'assessment-staff' : 'school';
+    const operation = kind === 'assessment-staff' ? (roles === teacherWriter ? 'staff-write' : 'staff-read') : 'read';
     return this.storage.run({ kind, userId: actor.sub, schoolId: actor.schoolId,
-      assessment: assessment && { ...assessment, membershipId: actor.membershipId } }, async r => {
+      assessment: { ...(assessment ?? { operation, targetId: actor.sub }), membershipId: actor.membershipId } }, async r => {
       await requireActor(r, actor, roles); return work(r);
     });
   }
@@ -83,18 +85,19 @@ export class AssessmentService {
     return result;
   }
 
-  private summary(a: Assessment, questions: readonly Pick<SafeQuestionWithOptions, 'points'>[]): AssessmentDto {
-    return { id: a.id, schoolId: a.schoolId, sectionSubjectId: a.sectionSubjectId, type: a.type, title: a.title, instructions: a.instructions, opensAt: a.opensAt?.toISOString() ?? null, dueAt: a.dueAt?.toISOString() ?? null, status: assessmentStatus(a), resultsReleasedAt: a.resultsReleasedAt?.toISOString() ?? null, createdAt: a.createdAt.toISOString(), questionCount: questions.length, totalPoints: Number(questions.reduce((sum, q) => sum + q.points, 0).toFixed(10)) };
+  private async summary(r: Repositories, a: Assessment): Promise<AssessmentDto> {
+    const { questionCount, totalPoints } = await r.assessments.questionStats(a.id);
+    return { id: a.id, schoolId: a.schoolId, sectionSubjectId: a.sectionSubjectId, type: a.type, title: a.title, instructions: a.instructions, opensAt: a.opensAt?.toISOString() ?? null, dueAt: a.dueAt?.toISOString() ?? null, status: assessmentStatus(a), resultsReleasedAt: a.resultsReleasedAt?.toISOString() ?? null, createdAt: a.createdAt.toISOString(), questionCount, totalPoints: Number(totalPoints.toFixed(10)) };
   }
 
   private async detail(r: Repositories, a: Assessment, author: boolean): Promise<AssessmentAuthorDetailDto | AssessmentDetailDto> {
+    const summary = await this.summary(r, a);
     if (author) {
       const questions = await this.questions(r, a, true);
-      return { ...this.summary(a, questions), questions: questions.map(q => ({ ...questionAuthorDto(q), order: q.order })) };
+      return { ...summary, questions: questions.map(q => ({ ...questionAuthorDto(q), order: q.order })) };
     }
-    const questions = await this.questions(r, a);
-    const summary = this.summary(a, questions);
-    return { ...summary, questions: !studentCanReadQuestions(a) ? [] : questions.map(q => ({ ...questionSafeDto(q), order: q.order })) };
+    const questions = studentCanReadQuestions(a) ? await this.questions(r, a) : [];
+    return { ...summary, questions: questions.map(q => ({ ...questionSafeDto(q), order: q.order })) };
   }
 
   list(actor: AuthUser, query: AssessmentListDto): Promise<Page<AssessmentDto>> {
@@ -102,14 +105,14 @@ export class AssessmentService {
       const assignments = new Set((await this.accessibleAssignments(r, actor)).map(a => a.id));
       const rows = (await r.assessments.list()).filter(a => assignments.has(a.sectionSubjectId) && (actor.role !== 'STUDENT' || a.status !== 'DRAFT') && (!query.sectionSubjectId || a.sectionSubjectId === query.sectionSubjectId) && (!query.type || a.type === query.type) && (!query.status || assessmentStatus(a) === query.status));
       const page = pageOf(rows, query, a => a.title);
-      return { ...page, items: await Promise.all(page.items.map(async a => this.summary(a, await this.questions(r, a)))) };
+      return { ...page, items: await Promise.all(page.items.map(a => this.summary(r, a))) };
     });
   }
 
   get(actor: AuthUser, id: string) { return this.school(actor, readers, async r => this.detail(r, await this.readable(r, actor, id), actor.role !== 'STUDENT')); }
 
   create(actor: AuthUser, input: CreateAssessmentDto) {
-    return this.school(actor, ['TEACHER'], async r => {
+    return this.school(actor, teacherWriter, async r => {
       await this.assignment(r, actor, input.sectionSubjectId, true);
       const opensAt = input.opensAt ? new Date(input.opensAt) : null;
       const dueAt = input.dueAt ? new Date(input.dueAt) : null;
@@ -120,7 +123,7 @@ export class AssessmentService {
   }
 
   update(actor: AuthUser, id: string, input: UpdateAssessmentDto) {
-    return this.school(actor, ['TEACHER'], async r => {
+    return this.school(actor, teacherWriter, async r => {
       const a = await this.writable(r, actor, id, true);
       const opensAt = input.opensAt === undefined ? a.opensAt : input.opensAt === null ? null : new Date(input.opensAt);
       const dueAt = input.dueAt === undefined ? a.dueAt : input.dueAt === null ? null : new Date(input.dueAt);
@@ -130,7 +133,7 @@ export class AssessmentService {
   }
 
   replaceQuestions(actor: AuthUser, id: string, input: ReplaceAssessmentQuestionsDto) {
-    return this.school(actor, ['TEACHER'], async r => {
+    return this.school(actor, teacherWriter, async r => {
       const a = await this.writable(r, actor, id, true);
       const assignment = await this.assignment(r, actor, a.sectionSubjectId, true);
       for (const link of input.questions) {
@@ -144,7 +147,7 @@ export class AssessmentService {
   }
 
   publish(actor: AuthUser, id: string) {
-    return this.school(actor, ['TEACHER'], async r => {
+    return this.school(actor, teacherWriter, async r => {
       const a = await this.writable(r, actor, id, true);
       const questions = await this.questions(r, a);
       if (!questions.length) throw new BadRequestException('Add at least one question before publishing');
@@ -163,7 +166,7 @@ export class AssessmentService {
   }
 
   transition(actor: AuthUser, id: string, action: 'close' | 'unpublish' | 'start-grading' | 'release' | 'archive') {
-    return this.school(actor, ['TEACHER'], async r => {
+    return this.school(actor, teacherWriter, async r => {
       const a = await this.writable(r, actor, id);
       const state = assessmentStatus(a);
       const submissions = await r.assessments.submissions(id);
@@ -273,7 +276,7 @@ export class AssessmentService {
   }
 
   grade(actor: AuthUser, id: string, input: GradeSubmissionDto): Promise<SubmissionDto> {
-    return this.school(actor, ['TEACHER'], async r => {
+    return this.school(actor, teacherWriter, async r => {
       const s = await r.assessments.submission(id);
       if (!s || s.status === 'IN_PROGRESS') throw missing();
       const a = await this.writable(r, actor, s.assessmentId);
@@ -292,7 +295,7 @@ export class AssessmentService {
       const graded = await r.assessments.saveSubmission({ ...row, status: 'GRADED', score, feedback: input.feedback === undefined ? s.feedback : input.feedback, gradedAt: new Date() }, answers, false);
       const updated = await r.assessments.update({ ...a, status: 'GRADING' });
       return this.submissionDto(updated, graded, true);
-    });
+    }, { operation: 'staff-grade', targetId: id });
   }
 
   private async releasedResults(r: Repositories, studentId: string, query: ListDto): Promise<Page<ReleasedResultDto>> {
@@ -301,7 +304,7 @@ export class AssessmentService {
     for (const a of await r.assessments.list()) {
       if (!assignments.has(a.sectionSubjectId) || !a.resultsReleasedAt || !['RESULTS_RELEASED', 'ARCHIVED'].includes(a.status)) continue;
       const s = await r.assessments.studentSubmission(a.id, studentId);
-      if (s?.status === 'GRADED') rows.push({ id: s.id, assessment: this.summary(a, await this.questions(r, a)), submission: this.submissionDto(a, s) });
+      if (s?.status === 'GRADED') rows.push({ id: s.id, assessment: await this.summary(r, a), submission: this.submissionDto(a, s) });
     }
     return pageOf(rows, query, v => v.assessment.title);
   }
@@ -310,7 +313,8 @@ export class AssessmentService {
 
   async childResults(actor: AuthUser, studentId: string, query: ListDto, schoolId?: string) {
     if (actor.role !== 'PARENT') throw new ForbiddenException();
-    const link = await this.storage.run({ kind: 'parent-list', userId: actor.sub, schoolId: null }, async r => {
+    const link = await this.storage.run({ kind: 'parent-list', userId: actor.sub, schoolId: actor.schoolId,
+      assessment: { membershipId: actor.membershipId, operation: 'discover', targetId: actor.sub } }, async r => {
       await requireActor(r, actor, ['PARENT']);
       return (await r.links.forParent(actor.sub)).find(l => l.studentId === studentId && (!schoolId || l.schoolId === schoolId));
     });

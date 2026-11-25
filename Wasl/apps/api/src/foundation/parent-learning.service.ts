@@ -18,7 +18,8 @@ export class ParentLearningService {
   ) {
     if (actor.role !== 'PARENT') throw new ForbiddenException();
     const link = await this.storage.run(
-      { kind: 'parent-list', userId: actor.sub, schoolId: null },
+      { kind: 'parent-list', userId: actor.sub, schoolId: actor.schoolId,
+        assessment: { membershipId: actor.membershipId, operation: 'discover', targetId: actor.sub } },
       async (r) => {
         await requireActor(r, actor, ['PARENT']);
         return (await r.links.forParent(actor.sub)).find(
@@ -28,7 +29,8 @@ export class ParentLearningService {
     );
     if (!link) throw new NotFoundException('Record not found');
     return this.storage.run(
-      { kind: 'school', userId: actor.sub, schoolId: link.schoolId },
+      { kind: 'school', userId: actor.sub, schoolId: link.schoolId,
+        assessment: { membershipId: actor.membershipId, operation: 'read', targetId: studentId } },
       async (r) => {
         await requireActor(r, actor, ['PARENT']);
         const current = (await r.links.forParent(actor.sub)).find(
@@ -46,9 +48,7 @@ export class ParentLearningService {
     );
   }
   private async summary(r: Repositories, a: Assessment) {
-    const questions = await Promise.all(
-      (await r.assessments.questions(a.id)).map((q) => r.questions.getSafeQuestion(q.questionId)),
-    );
+    const stats = await r.assessments.questionStats(a.id);
     return {
       ...a,
       createdAt: a.createdAt.toISOString(),
@@ -56,8 +56,7 @@ export class ParentLearningService {
       dueAt: a.dueAt?.toISOString() ?? null,
       resultsReleasedAt: a.resultsReleasedAt?.toISOString() ?? null,
       status: assessmentStatus(a),
-      questionCount: questions.length,
-      totalPoints: questions.reduce((n, q) => n + (q?.points ?? 0), 0),
+      ...stats,
     };
   }
   bundle(actor: AuthUser, studentId: string, schoolId?: string) {

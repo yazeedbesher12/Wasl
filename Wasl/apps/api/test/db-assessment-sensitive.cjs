@@ -60,6 +60,8 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
     const create = async role => actor(await foundation.createUser(admin, { email: email(), fullName: `Fictional ${role}`, password, role }));
     const teacher = await create('TEACHER');
     const student = await create('STUDENT');
+    const peer = await create('STUDENT');
+    const unassignedTeacher = await create('TEACHER');
     const parent = await create('PARENT');
     const link = await foundation.createLink(admin, { parentId: parent.sub, studentId: student.sub });
     await foundation.linkStatus(admin, link.id, 'VERIFIED');
@@ -70,6 +72,7 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
     const unassigned = await foundation.saveAcademic(admin, 'subjects', { nameEn: 'Unassigned Subject', nameAr: 'Unassigned Subject' });
     const assignment = await foundation.saveAcademic(admin, 'sectionSubjects', { sectionId: section.id, subjectId: subject.id, teacherId: teacher.sub });
     await foundation.saveAcademic(admin, 'enrollments', { sectionId: section.id, studentId: student.sub });
+    await foundation.saveAcademic(admin, 'enrollments', { sectionId: section.id, studentId: peer.sub });
     const bank = await learning.createQuestionBank(teacher, { subjectId: subject.id, name: 'Fictional Bank' });
     const choice = await learning.createQuestion(teacher, bank.id, { type: 'MULTIPLE_CHOICE', text: 'Fictional prompt', points: 3,
       options: [{ text: 'Alpha', isCorrect: true }, { text: 'Beta', isCorrect: false }] });
@@ -78,7 +81,7 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
     const assessment = await grading.create(teacher, { sectionSubjectId: assignment.id, type: 'ASSIGNMENT', title: 'Fictional work' });
     await grading.replaceQuestions(teacher, assessment.id, { questions: [{ questionId: choice.id, order: 0 }, { questionId: short.id, order: 1 }] });
     await grading.publish(teacher, assessment.id);
-    return { school, teacher, student, parent, unassigned, choice, short, assessment };
+    return { school, admin, teacher, unassignedTeacher, student, peer, parent, link, assignment, unassigned, choice, short, assessment };
   }
   const a = await fixtures('Fictional Alpha');
   const b = await fixtures('Fictional Beta');
@@ -93,6 +96,69 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
       options.actor ?? who.sub, who.membershipId, options.school ?? who.schoolId, `assessment:${operation}`, target]);
     return { payload, tag: createHmac('sha256', key).update(payload).digest('hex') };
   }
+
+  await t.test('learner rows require verified school, participant and publication scope', async () => {
+    const draftFor = (fixture, student) => grading.save(student, fixture.assessment.id, {
+      answers: [{ questionId: fixture.short.id, text: 'Fictional private response' }],
+    }, false);
+    const [own, peer, foreign] = await Promise.all([draftFor(a, a.student), draftFor(a, a.peer), draftFor(b, b.student)]);
+    const scheduled = await grading.create(a.teacher, { sectionSubjectId: a.assignment.id, type: 'ASSIGNMENT', title: 'Fictional Scheduled',
+      opensAt: new Date(Date.now() + 3600000).toISOString() });
+    const laterBank = await learning.createQuestionBank(a.teacher, { subjectId: (await foundation.getAcademic(a.admin, 'sectionSubjects', a.assignment.id)).subjectId,
+      name: 'Fictional future bank' });
+    const laterQuestion = await learning.createQuestion(a.teacher, laterBank.id, { type: 'MULTIPLE_CHOICE', text: 'Fictional future prompt', points: 2,
+      options: [{ text: 'Fictional correct', isCorrect: true }, { text: 'Fictional alternative', isCorrect: false }] });
+    await grading.replaceQuestions(a.teacher, scheduled.id, { questions: [{ questionId: laterQuestion.id, order: 0 }] });
+    await grading.publish(a.teacher, scheduled.id);
+    const summary = await grading.get(a.student, scheduled.id);
+    assert.equal(summary.questionCount, 1);
+    assert.equal(summary.totalPoints, 2);
+    assert.deepEqual(summary.questions, []);
+
+    const read = tx => tx.$queryRaw`SELECT s.id FROM public.submissions s JOIN public.answers ans
+      ON ans.submission_id = s.id WHERE s.id IN (${own.id}::uuid, ${peer.id}::uuid, ${foreign.id}::uuid) AND ans.response IS NOT NULL`;
+    assert.deepEqual(await read(db), []);
+    assert.deepEqual(await db.$queryRaw`SELECT id FROM public.parent_student_links`, []);
+    const rollback = new Error('Fictional isolation rollback');
+    let captured;
+    await assert.rejects(db.$transaction(async tx => {
+      await tx.$queryRaw`SELECT set_config('app.school_id', ${a.school.id}, true), set_config('app.user_id', ${a.student.sub}, true), set_config('app.bypass_rls', 'on', true)`;
+      assert.deepEqual(await read(tx), []);
+      const bound = await proof(tx, a.student, a.assessment.id, 'draft');
+      for (const invalid of [{ ...bound, tag: '0'.repeat(64) }, await proof(tx, a.student, a.assessment.id, 'draft', { expires: Date.now() - 5000 }),
+        await proof(tx, a.student, a.assessment.id, 'draft', { school: b.school.id }), await proof(tx, a.student, a.assessment.id, 'draft', { actor: a.peer.sub })]) {
+        await install(tx, invalid);
+        assert.deepEqual(await read(tx), []);
+      }
+      captured = bound;
+      await install(tx, bound);
+      assert.deepEqual(await read(tx), [{ id: own.id }]);
+      assert.deepEqual(await tx.$queryRaw`SELECT id FROM public.assessments WHERE id = ${scheduled.id}::uuid`, []);
+      const labels = await tx.$queryRaw`SELECT question_id AS id FROM wasl_assessment.learner_options WHERE question_id IN (${a.choice.id}::uuid, ${b.choice.id}::uuid, ${laterQuestion.id}::uuid)`;
+      assert.deepEqual(labels.map(q => q.id), [a.choice.id, a.choice.id]);
+      await other.$transaction(async fresh => { await install(fresh, bound); assert.deepEqual(await read(fresh), []); });
+      throw rollback;
+    }), error => error === rollback);
+    await db.$transaction(async later => {
+      await install(later, captured);
+      assert.deepEqual(await read(later), []);
+      await install(later, await proof(later, a.student, a.student.sub, 'read'));
+      assert.deepEqual(await later.$queryRaw`SELECT id FROM public.questions WHERE id = ${laterQuestion.id}::uuid`, []);
+    });
+
+    await assert.rejects(db.$transaction(async tx => {
+      await install(tx, await proof(tx, a.student, a.student.sub, 'read'));
+      return tx.$queryRaw`SELECT o.is_correct FROM public.questions q JOIN public.question_options o ON o.question_id = q.id`;
+    }), denied);
+    const staff = clients.assessmentStaff;
+    assert.deepEqual(await staff.$queryRaw`SELECT id FROM public.assessments`, []);
+    await staff.$transaction(async tx => {
+      await install(tx, await proof(tx, a.unassignedTeacher, a.unassignedTeacher.sub, 'staff-write'));
+      assert.deepEqual(await tx.$queryRaw`SELECT id FROM public.assessments WHERE id = ${a.assessment.id}::uuid`, []);
+      assert.deepEqual(await tx.$queryRaw`SELECT response FROM public.answers WHERE submission_id = ${own.id}::uuid`, []);
+      assert.equal(await tx.$executeRaw`UPDATE public.assessments SET title = 'Unauthorized' WHERE id = ${a.assessment.id}::uuid`, 0);
+    });
+  });
 
   await t.test('the tenant cannot retrieve keys or write protected columns or release state', async () => {
     for (const run of [
@@ -165,6 +231,15 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
     assert.equal((await grading.ownSubmission(a.student, a.assessment.id)).answers.length, 2);
     assert.equal((await grading.save(a.student, a.assessment.id, request, true)).status, 'SUBMITTED');
     await grading.transition(a.teacher, a.assessment.id, 'close');
+    const staff = clients.assessmentStaff;
+    await assert.rejects(staff.$transaction(async tx => {
+      await install(tx, await proof(tx, a.teacher, draft.id, 'staff-grade'));
+      return tx.$executeRaw`UPDATE public.answers SET response = '"Fictional replacement"'::jsonb WHERE submission_id = ${draft.id}::uuid`;
+    }), denied);
+    await assert.rejects(staff.$transaction(async tx => {
+      await install(tx, await proof(tx, a.teacher, draft.id, 'staff-grade'));
+      return tx.$executeRaw`UPDATE public.assessments SET status = 'RESULTS_RELEASED', results_released_at = CURRENT_TIMESTAMP WHERE id = ${a.assessment.id}::uuid`;
+    }), denied);
     const graded = await grading.grade(a.teacher, draft.id, { answers: [{ questionId: a.choice.id, score: 3 }, { questionId: a.short.id, score: 1 }], feedback: 'Fictional feedback' });
     assert.equal(graded.score, 4);
     assert.equal((await grading.ownSubmission(a.student, a.assessment.id)).score, null);
@@ -201,5 +276,27 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
       await install(later, captured);
       assert.deepEqual(await readGrade(later, draft.id), []);
     });
+  });
+
+  await t.test('released parent reads are bound to one verified child and stop after revocation', async () => {
+    const released = await grading.ownSubmission(a.student, a.assessment.id);
+    const read = tx => tx.$queryRaw`SELECT ans.id FROM public.answers ans WHERE ans.submission_id = ${released.id}::uuid`;
+    await db.$transaction(async tx => {
+      await install(tx, await proof(tx, a.parent, a.peer.sub, 'results'));
+      assert.deepEqual(await read(tx), []);
+      assert.deepEqual(await tx.$queryRaw`SELECT id FROM public.parent_student_links`, []);
+      await install(tx, await proof(tx, a.parent, a.student.sub, 'results'));
+      assert.equal((await read(tx)).length, 2);
+      assert.equal((await readGrade(tx, released.id))[0].score, 4);
+      assert.deepEqual(await tx.$queryRaw`SELECT id FROM public.parent_student_links`, [{ id: a.link.id }]);
+    });
+    await foundation.linkStatus(a.admin, a.link.id, 'REJECTED');
+    await db.$transaction(async tx => {
+      await install(tx, await proof(tx, a.parent, a.student.sub, 'results'));
+      assert.deepEqual(await read(tx), []);
+      assert.deepEqual(await readGrade(tx, released.id), []);
+      assert.deepEqual(await tx.$queryRaw`SELECT id FROM public.parent_student_links`, []);
+    });
+    await assert.rejects(grading.childResults(a.parent, a.student.sub, page), notFound);
   });
 });

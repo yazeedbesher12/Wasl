@@ -11,7 +11,7 @@ export interface StorageScope {
   userId: string | null;
   schoolId: string | null;
   subjects?: { membershipId: string; access: SubjectAccess };
-  assessment?: { membershipId: string; operation: 'draft' | 'submit' | 'results'; targetId: string };
+  assessment?: { membershipId: string; operation: 'draft' | 'submit' | 'results' | 'read' | 'metadata' | 'discover' | 'staff-read' | 'staff-write' | 'staff-grade'; targetId: string };
 }
 export interface IdentityRepository {
   personById(id: string): Promise<PersonProfile | null>;
@@ -83,6 +83,7 @@ export interface QuestionRepository {
   isQuestionLocked(id: string): Promise<boolean>;
 }
 export interface AssessmentRepository {
+  questionStats(id: string): Promise<{ questionCount: number; totalPoints: number }>;
   list(): Promise<Assessment[]>;
   get(id: string): Promise<Assessment | null>;
   create(row: Assessment): Promise<Assessment>;

@@ -27,10 +27,12 @@ export function pageOf<T extends { id: string }>(rows: T[], query: ListDto, name
 @Injectable()
 export class FoundationService {
   constructor(@Inject(STORAGE) private storage: FoundationStorage) {}
-  private school<T>(actor: AuthUser, roles: readonly Role[], work: (r: Repositories) => Promise<T>, kind: 'school' | 'school-administration' | 'academic-administration' = 'school', access?: SubjectAccess) {
+  private school<T>(actor: AuthUser, roles: readonly Role[], work: (r: Repositories) => Promise<T>, kind: 'school' | 'school-administration' | 'academic-administration' = 'school', access?: SubjectAccess, linkMetadata = false) {
     if (!actor.schoolId) throw new ForbiddenException('An active school role is required');
     const subjects = access && { membershipId: actor.membershipId, access };
-    return this.storage.run({ kind, userId: actor.sub, schoolId: actor.schoolId, subjects }, async r => { await requireActor(r, actor, roles); return work(r); });
+    return this.storage.run({ kind, userId: actor.sub, schoolId: actor.schoolId, subjects,
+      assessment: linkMetadata ? { membershipId: actor.membershipId, operation: 'metadata', targetId: actor.sub } : undefined },
+    async r => { await requireActor(r, actor, roles); return work(r); });
   }
   private platform<T>(actor: AuthUser, work: (r: Repositories) => Promise<T>, targetSchoolId: string | null = null) {
     if (actor.role !== 'PLATFORM_ADMIN') throw new ForbiddenException();
@@ -221,8 +223,8 @@ export class FoundationService {
     const rows = await this.visibleAcademic(r, actor, 'sectionSubjects'); const enrollments = await this.visibleAcademic(r, actor, 'enrollments');
     return { school: schoolDto(school), student: student ? { id: student.id, fullName: student.fullName } : null, classes: await Promise.all(rows.map(a => this.classDto(r, a))), enrollments: enrollments.map(e => academicDto('enrollments', e)), counts: { academicYears: (await this.visibleAcademic(r, actor, 'academicYears')).length, sections: (await this.visibleAcademic(r, actor, 'sections')).length, subjects: (await this.visibleAcademic(r, actor, 'subjects')).length, assignments: rows.length, activeEnrollments: enrollments.filter(e => e.status === 'ACTIVE').length } };
   }
-  links(actor: AuthUser, q: LinkListDto) { return this.school(actor, ['SCHOOL_ADMIN'], async r => { const page = pageOf((await r.links.list()).filter(l => !q.status || l.status === q.status), q, l => l.parentId + ' ' + l.studentId); return { ...page, items: page.items.map(linkDto) }; }); }
-  getLink(actor: AuthUser, id: string) { return this.school(actor, ['SCHOOL_ADMIN'], async r => { const link = await r.links.get(id); if (!link) throw notFound(); return linkDto(link); }); }
+  links(actor: AuthUser, q: LinkListDto) { return this.school(actor, ['SCHOOL_ADMIN'], async r => { const page = pageOf((await r.links.list()).filter(l => !q.status || l.status === q.status), q, l => l.parentId + ' ' + l.studentId); return { ...page, items: page.items.map(linkDto) }; }, 'school', undefined, true); }
+  getLink(actor: AuthUser, id: string) { return this.school(actor, ['SCHOOL_ADMIN'], async r => { const link = await r.links.get(id); if (!link) throw notFound(); return linkDto(link); }, 'school', undefined, true); }
   createLink(actor: AuthUser, input: CreateLinkDto) { return this.school(actor, ['SCHOOL_ADMIN'], async r => {
     if (input.parentId === input.studentId || !await r.people.eligible(input.parentId, 'PARENT') || !await r.people.eligible(input.studentId, 'STUDENT')) throw notFound();
     return linkDto(await r.links.create({ id: randomUUID(), schoolId: actor.schoolId!, parentId: input.parentId, studentId: input.studentId, status: 'PENDING', verifiedAt: null, createdAt: new Date() }));
@@ -235,11 +237,14 @@ export class FoundationService {
   private async parentLinks(actor: AuthUser) {
     if (actor.role !== 'PARENT') throw new ForbiddenException();
     // Exact own-parent identity lookup without tenant bypass. No arbitrary child lookup here.
-    return this.storage.run({ kind: 'parent-list', userId: actor.sub, schoolId: null }, async r => { await requireActor(r, actor, ['PARENT']); return r.links.forParent(actor.sub); });
+    return this.storage.run({ kind: 'parent-list', userId: actor.sub, schoolId: actor.schoolId,
+      assessment: { membershipId: actor.membershipId, operation: 'discover', targetId: actor.sub } },
+    async r => { await requireActor(r, actor, ['PARENT']); return r.links.forParent(actor.sub); });
   }
   private parentChild<T>(actor: AuthUser, link: ParentLink, work: (r: Repositories, student: PersonProfile) => Promise<T>) {
     return this.storage.run({ kind: 'school', userId: actor.sub, schoolId: link.schoolId,
-      subjects: { membershipId: actor.membershipId, access: { operation: 'read', childId: link.studentId } } }, async r => {
+      subjects: { membershipId: actor.membershipId, access: { operation: 'read', childId: link.studentId } },
+      assessment: { membershipId: actor.membershipId, operation: 'read', targetId: link.studentId } }, async r => {
       await requireActor(r, actor, ['PARENT']);
       const current = (await r.links.forParent(actor.sub)).find(l => l.id === link.id && l.studentId === link.studentId && l.status === 'VERIFIED');
       if (!current || !(await r.schools.get(link.schoolId))?.active || !await r.people.eligible(actor.sub, 'PARENT') || !await r.people.eligible(link.studentId, 'STUDENT')) throw notFound();

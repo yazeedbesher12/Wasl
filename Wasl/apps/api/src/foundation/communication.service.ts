@@ -26,7 +26,9 @@ export class CommunicationService {
   constructor(@Inject(STORAGE) private storage: FoundationStorage) {}
   private school<T>(actor: AuthUser, allowed: readonly Role[], work: (r: Repositories) => Promise<T>) {
     if (!actor.schoolId) throw new ForbiddenException('An active school role is required');
-    return this.storage.run({ kind: 'school', userId: actor.sub, schoolId: actor.schoolId }, async r => { await requireActor(r, actor, allowed); return work(r); });
+    return this.storage.run({ kind: 'school', userId: actor.sub, schoolId: actor.schoolId,
+      assessment: { membershipId: actor.membershipId, operation: 'metadata', targetId: actor.sub } },
+    async r => { await requireActor(r, actor, allowed); return work(r); });
   }
   private async writableClass(r: Repositories, actor: AuthUser, id: string | null) {
     if (!id) { if (actor.role !== 'SCHOOL_ADMIN') throw new ForbiddenException('Teachers must select an assigned class'); return; }

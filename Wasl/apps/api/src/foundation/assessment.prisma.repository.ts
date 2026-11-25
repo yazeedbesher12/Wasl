@@ -29,10 +29,20 @@ export function prismaAssessments(tx: Prisma.TransactionClient, schoolId: string
     };
   };
   return {
+    questionStats: async id => {
+      const [stats] = await tx.$queryRaw<{ questionCount: number; totalPoints: number }[]>`
+        SELECT question_count AS "questionCount", total_points AS "totalPoints"
+        FROM wasl_assessment.question_stats(${schoolId}::uuid, ${id}::uuid)`;
+      return stats;
+    },
     list: () => tx.assessment.findMany({ where: { schoolId } }),
     get: id => tx.assessment.findFirst({ where: { id, schoolId } }),
     create: data => { scope(data); return tx.assessment.create({ data }); },
-    update: data => { scope(data); return tx.assessment.update({ where: { id: data.id, schoolId }, data }); },
+    update: row => {
+      scope(row);
+      const { type, title, instructions, opensAt, dueAt, status, resultsReleasedAt } = row;
+      return tx.assessment.update({ where: { id: row.id, schoolId }, data: { type, title, instructions, opensAt, dueAt, status, resultsReleasedAt } });
+    },
     questions: id => tx.assessmentQuestion.findMany({ where: { assessmentId: id, schoolId }, orderBy: [{ order: 'asc' }, { questionId: 'asc' }] }),
     replaceQuestions: async (id, rows) => {
       rows.forEach(row => { scope(row); if (row.assessmentId !== id) throw new NotFoundException(); });
@@ -46,25 +56,28 @@ export function prismaAssessments(tx: Prisma.TransactionClient, schoolId: string
     saveSubmission: async (data, answers, create) => {
       scope(data); answers.forEach(a => { scope(a); if (a.submissionId !== data.id) throw new NotFoundException(); });
       if (staff) {
-        if (create) await tx.submission.create({ data });
-        else await tx.submission.update({ where: { id: data.id, schoolId }, data });
-      } else if (create) {
+        if (create) throw new ConflictException('Grading requires an existing submission');
+        const { status, score, feedback, gradedAt } = data;
+        await tx.submission.update({ where: { id: data.id, schoolId }, data: { status, score, feedback, gradedAt } });
+        for (const answer of answers) await tx.answer.update({
+          where: { id: answer.id, schoolId, submissionId: data.id }, data: { score: answer.score }, select: { id: true },
+        });
+        return map(await tx.submission.findUniqueOrThrow({ where: { id: data.id, schoolId }, select }));
+      }
+      if (create) {
         await tx.$executeRaw`INSERT INTO public.submissions (id, school_id, assessment_id, student_id)
           VALUES (${data.id}::uuid, ${schoolId}::uuid, ${data.assessmentId}::uuid, ${data.studentId}::uuid)`;
       }
       await tx.answer.deleteMany({ where: { submissionId: data.id, schoolId } });
-      if (answers.length && staff) await tx.answer.createMany({ data: answers.map(a => ({ ...a, response: a.response ?? Prisma.DbNull })) });
-      if (answers.length && !staff) {
+      if (answers.length) {
         const values = answers.map(a => Prisma.sql`(${a.id}::uuid, ${schoolId}::uuid, ${a.submissionId}::uuid,
           ${a.questionId}::uuid, ${a.response === null ? null : JSON.stringify(a.response)}::jsonb, ${a.fileKey})`);
         await tx.$executeRaw`INSERT INTO public.answers (id, school_id, submission_id, question_id, response, file_key)
           VALUES ${Prisma.join(values)}`;
       }
-      if (!staff) {
-        const updated = await tx.$executeRaw`UPDATE public.submissions SET status = ${data.status}::public."SubmissionStatus",
-          submitted_at = ${data.submittedAt} WHERE id = ${data.id}::uuid AND school_id = ${schoolId}::uuid`;
-        if (updated !== 1) throw new ConflictException('This assessment has already been submitted');
-      }
+      const updated = await tx.$executeRaw`UPDATE public.submissions SET status = ${data.status}::public."SubmissionStatus",
+        submitted_at = ${data.submittedAt} WHERE id = ${data.id}::uuid AND school_id = ${schoolId}::uuid`;
+      if (updated !== 1) throw new ConflictException('This assessment has already been submitted');
       return map(await tx.submission.findUniqueOrThrow({ where: { id: data.id, schoolId }, select }));
     },
   };

@@ -18,6 +18,11 @@ export function memoryAssessments(s: MemoryState, schoolId: string | null): Asse
       if (index < 0 || !scoped(row)) throw missing();
       s.assessments[index] = row; return row;
     },
+    questionStats: async id => {
+      const links = s.assessmentQuestions.filter(q => q.assessmentId === id && scoped(q));
+      return { questionCount: links.length, totalPoints: links.reduce((total, link) =>
+        total + (s.questions.find(q => q.id === link.questionId && scoped(q))?.points ?? 0), 0) };
+    },
     questions: async id => s.assessmentQuestions.filter(q => q.assessmentId === id && scoped(q)).sort((a, b) => a.order - b.order || a.questionId.localeCompare(b.questionId)),
     replaceQuestions: async (id, rows) => {
       if (!s.assessments.some(a => a.id === id && scoped(a)) || rows.some(q => !scoped(q) || q.assessmentId !== id || !s.questions.some(v => v.id === q.questionId && scoped(v)))) throw missing();

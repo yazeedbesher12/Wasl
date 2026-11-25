@@ -25,9 +25,11 @@ function inspect(file: Express.Multer.File) {
 export class FileService {
   private readonly logger = new Logger(FileService.name);
   constructor(@Inject(STORAGE) private storage: FoundationStorage, @Inject(OBJECT_STORE) private objects: ObjectStore) {}
-  private scope<T>(actor: AuthUser, work: (r: Repositories) => Promise<T>) {
+  private scope<T>(actor: AuthUser, work: (r: Repositories) => Promise<T>, participant = actor.sub) {
     if (!actor.schoolId) throw new ForbiddenException('An active school role is required');
-    return this.storage.run({ kind: 'school', userId: actor.sub, schoolId: actor.schoolId }, async r => { await requireActor(r, actor, ['TEACHER', 'SCHOOL_ADMIN', 'STUDENT', 'PARENT']); return work(r); });
+    return this.storage.run({ kind: 'school', userId: actor.sub, schoolId: actor.schoolId,
+      assessment: { membershipId: actor.membershipId, operation: actor.role === 'PARENT' && participant === actor.sub ? 'metadata' : 'read', targetId: participant } },
+    async r => { await requireActor(r, actor, ['TEACHER', 'SCHOOL_ADMIN', 'STUDENT', 'PARENT']); return work(r); });
   }
   async upload(actor: AuthUser, input: FileUploadDto, file?: Express.Multer.File) {
     if (!file) throw new BadRequestException('Attach one file in the file field');
@@ -46,17 +48,29 @@ export class FileService {
       throw error;
     }
   }
-  resolve(actor: AuthUser, key: string) { return this.scope(actor, async r => { const f = await r.files.byKey(key); if (!f) throw new NotFoundException('File not found'); await authorizeFile(r, actor, f); return fileDto(f); }); }
+  private async authorizedFile(actor: AuthUser, lookup: (r: Repositories) => Promise<FileObject | null>) {
+    // Use parent file metadata only to bind the follow-up proof to one child. The
+    // authorization transaction looks up the file again and rechecks the link.
+    const candidate = actor.role === 'PARENT' ? await this.scope(actor, lookup) : null;
+    const participant = candidate?.purpose === 'ASSESSMENT_ANSWER' ? candidate.ownerId : actor.sub;
+    return this.scope(actor, async r => {
+      const file = await lookup(r);
+      if (!file || (actor.role === 'PARENT' && file.purpose === 'ASSESSMENT_ANSWER' && file.ownerId !== participant)) throw new NotFoundException('File not found');
+      await authorizeFile(r, actor, file);
+      return file;
+    }, participant);
+  }
+  async resolve(actor: AuthUser, key: string) { return fileDto(await this.authorizedFile(actor, r => r.files.byKey(key))); }
   metadata(actor: AuthUser, id: string) {
-    return this.scope(actor, async r => { const f = await r.files.get(id); if (!f) throw new NotFoundException('File not found'); await authorizeFile(r, actor, f); return fileDto(f); });
+    return this.authorizedFile(actor, r => r.files.get(id)).then(fileDto);
   }
   async download(actor: AuthUser, id: string) {
-    const f = await this.scope(actor, async r => { const file = await r.files.get(id); if (!file) throw new NotFoundException('File not found'); await authorizeFile(r, actor, file); return file; });
+    const f = await this.authorizedFile(actor, r => r.files.get(id));
     if (f.storageDriver !== this.objects.driver) throw new ServiceUnavailableException('The configured file store does not hold this file');
     const data = await this.objects.get(f.storageKey);
     if (data.length !== f.size || createHash('sha256').update(data).digest('hex') !== f.sha256) throw new ServiceUnavailableException('Stored file integrity check failed');
     // Do not return bytes after a role/link/publication change during retrieval.
-    await this.scope(actor, r => authorizeFile(r, actor, f));
+    await this.authorizedFile(actor, r => r.files.get(id));
     return { data, metadata: fileDto(f) };
   }
 }

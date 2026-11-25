@@ -161,6 +161,33 @@ and scoped answer scores after independent verification. A proof remains usable
 for its exact purpose until expiration or transaction end. Existing learner DTO
 nulls and omitted correctness fields are preserved by safe database projections.
 
+### Verified learner and assessment rows
+
+The pre-migration catalog audit found the following effective grants for
+`wasl_tenant`. A column grant still permits ordinary SQL and joins where RLS
+allows the row.
+
+| Relation | Baseline tenant grants | Verified scope in `202611260005` |
+| --- | --- | --- |
+| `question_options` | No base grants. The safe view exposed labels from every school. | The safe view requires eligible delivery of the question. Staff base-table policies require authoring or assigned assessment access. |
+| `questions`, `question_banks` | Table SELECT, with no RLS. | Staff authoring is scoped by subject assignment or school-admin membership. Learner metadata is visible only through an eligible opened assessment. |
+| `assessments`, `assessment_questions` | Table SELECT, with no RLS. | Verify class assignment or active enrollment. Learners can read scheduled assessment metadata while prompts, option labels, and link rows wait until opening. Question totals use a scoped aggregate. |
+| `submissions` | Non-grade column SELECT, limited INSERT and UPDATE. SELECT policy allowed every row. | Verify ownership or an assigned staff relationship. Parent reads require the exact verified child and published results. Draft writes keep their original rules. |
+| `answers` | Non-score column SELECT, limited INSERT and DELETE. SELECT policy allowed every row. | Verify the parent submission and participant. Notification metadata proofs confer no answer access. Staff grading binds to one submission. |
+| `parent_student_links` | Table SELECT for the tenant and trusted staff. | Parent discovery returns only the parent's verified active links. Teachers can read links for students in their assigned classes when resolving notification recipients. The academic-admin role still manages links and is trusted. |
+
+The migration reuses the signed assessment transaction proof and the existing
+non-login verifier. Separate read, metadata, parent discovery, authoring, and
+grading purposes narrow the rows that the credential can see. A grading proof
+is bound to one submission. It can set its assessment to `GRADING` and update
+marks, but cannot publish the results or redirect a submission. Application
+authorization and Serializable retries remain in the same execution path.
+Parent-link revocation takes effect on subsequent transactions. The database
+owner, verifier ownership boundary, and API signing process remain trusted.
+
+DB-01 remains open for other tenant data, including academic information outside
+Subjects, learning content, and the legacy file and notification policies.
+
 For local PostgreSQL choose appropriate local TLS settings. For hosted PostgreSQL,
 confirm provider TLS, network access, pool/direct endpoint and connection limits.
 An application pooler must support interactive transactions and transaction-local

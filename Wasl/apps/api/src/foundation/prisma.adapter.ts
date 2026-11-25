@@ -157,7 +157,7 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
         listBanks: () => tx.questionBank.findMany({ where }),
         getBank: id => tx.questionBank.findFirst({ where: { id, schoolId } }),
         createBank: data => { scoped(data); return tx.questionBank.create({ data }); },
-        updateBank: data => { scoped(data); return tx.questionBank.update({ where: { id: data.id, schoolId }, data }); },
+        updateBank: data => { scoped(data); return tx.questionBank.update({ where: { id: data.id, schoolId }, data: { name: data.name } }); },
         listQuestions: () => tx.question.findMany({ where, include: { options: true } }),
         getQuestion: id => tx.question.findFirst({ where: { id, schoolId }, include: { options: true } }),
         listSafeQuestions: async () => {
@@ -183,12 +183,17 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
         },
         updateQuestion: async (data, options) => {
           scoped(data); options.forEach(scoped);
-          await tx.question.update({ where: { id: data.id, schoolId }, data });
+          const { type, text, points } = data;
+          await tx.question.update({ where: { id: data.id, schoolId }, data: { type, text, points } });
           await tx.questionOption.deleteMany({ where: { questionId: data.id, schoolId } });
           if (options.length) await tx.questionOption.createMany({ data: options });
           return tx.question.findUniqueOrThrow({ where: { id: data.id }, include: { options: true } });
         },
-        isQuestionLocked: async id => !!await tx.assessmentQuestion.findFirst({ where: { questionId: id, schoolId, assessment: { status: { not: 'DRAFT' } } }, select: { questionId: true } }),
+        isQuestionLocked: async id => {
+          const [row] = await tx.$queryRaw<{ locked: boolean }[]>`
+            SELECT wasl_assessment.question_locked(${schoolId}::uuid, ${id}::uuid) AS locked`;
+          return row.locked;
+        },
       },
       links: {
         list: () => tx.parentStudentLink.findMany({ where }),
