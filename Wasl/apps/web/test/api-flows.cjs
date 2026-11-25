@@ -44,6 +44,7 @@ async function ready(url) {
 }
 const testPdf = Buffer.from('%PDF-1.7\nFictional integration document\n%%EOF\n');
 async function main() {
+  const production = process.env.WASL_TEST_WEB_PRODUCTION === '1';
   temporary = await mkdtemp(path.join(require('node:os').tmpdir(), 'wasl-web-test-'));
   const apiPort = await port(),
     webPort = await port();
@@ -67,16 +68,18 @@ async function main() {
   );
   start(
     path.join(root, 'node_modules/next/dist/bin/next'),
-    ['dev', '-H', '127.0.0.1', '-p', String(webPort)],
+    [production ? 'start' : 'dev', '-H', '127.0.0.1', '-p', String(webPort)],
     path.join(root, 'apps/web'),
     {
-      NODE_ENV: 'development',
+      NODE_ENV: production ? 'production' : 'development',
       WASL_API_URL: upstream,
       WASL_WEB_ORIGIN: base,
       NEXT_TELEMETRY_DISABLED: '1',
     },
   );
   await Promise.all([ready(upstream + '/health/ready'), ready(base + '/login')]);
+  const anonymous = await fetch(base + '/api/wasl/me');
+  assert.equal(anonymous.status, 401);
   const launch = () =>
     chromium.launch({
       headless: true,
@@ -130,10 +133,12 @@ async function main() {
     assert(loginResult.ok(), 'Login: ' + loginResult.status());
     await page.waitForURL((url) => !url.pathname.startsWith('/login'));
     await page.getByRole('heading', { level: 1 }).waitFor();
-    assert.equal(
-      (await (await person.context.request.get(base + '/api/wasl/me')).json()).email,
-      email,
-    );
+    const me = await page.evaluate(async () => {
+      const response = await fetch('/api/wasl/me');
+      return { status: response.status, email: (await response.json()).email };
+    });
+    assert.equal(me.status, 200);
+    assert.equal(me.email, email);
     return person;
   }
   async function save(page, fields) {
@@ -154,6 +159,10 @@ async function main() {
   const platform = await signIn('platform@wasl.test');
   console.log('PASS real login and role routing for five roles');
   await activate(student);
+  await student.page.getByRole('button', { name: 'عربي', exact: true }).click();
+  await student.page.locator('html[lang="ar"][dir="rtl"]').waitFor({ state: 'attached' });
+  await student.page.getByRole('button', { name: 'English', exact: true }).click();
+  await student.page.locator('html[lang="en"][dir="ltr"]').waitFor({ state: 'attached' });
   await student.page
     .getByRole('combobox', { name: 'Navigate', exact: true })
     .selectOption('lessons');
@@ -166,18 +175,27 @@ async function main() {
     const cookie = cookies.find((c) => c.name === name);
     assert(cookie?.httpOnly);
     assert.equal(cookie.sameSite, 'Lax');
+    if (production) assert.equal(cookie.secure, true, `${name} must be Secure in production`);
   }
   const csrf = await teacher.context.request.post(base + '/api/wasl/auth/switch-school', {
-    headers: { Origin: 'https://outside.example' },
+    headers: {
+      Origin: 'https://outside.example',
+      Cookie: cookies.filter((c) => c.name.startsWith('wasl.')).map((c) => `${c.name}=${c.value}`).join('; '),
+    },
     data: { schoolId: id(1), role: 'TEACHER' },
   });
   assert.equal(csrf.status(), 403);
-  const loginResponse = await teacher.context.request.post(base + '/api/wasl/auth/login', {
-    headers: { Origin: base },
-    data: { email: 'teacher1@wasl.test', password },
-  });
-  const responseBody = await loginResponse.json();
-  assert(!responseBody.accessToken && !responseBody.refreshToken);
+  const loginCheck = await teacher.page.evaluate(async (password) => {
+    const response = await fetch('/api/wasl/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'teacher1@wasl.test', password }),
+    });
+    const body = await response.json();
+    return { status: response.status, hasTokens: 'accessToken' in body || 'refreshToken' in body };
+  }, password);
+  assert.equal(loginCheck.status, 200);
+  assert.equal(loginCheck.hasTokens, false);
   await teacher.context.clearCookies({ name: 'wasl.access' });
   await activate(teacher);
   await teacher.page.goto(base + '/teacher/lessons');
@@ -228,6 +246,8 @@ async function main() {
   await student.page.getByText('Saved.', { exact: true }).waitFor();
   await activate(student);
   await student.page.reload();
+  // The form appears before the submission request has populated the saved draft.
+  await student.page.getByRole('button', { name: 'Save answer draft', exact: true }).waitFor();
   assert.equal(
     await student.page.locator(`textarea[name="answer-${questionId}"]`).inputValue(),
     'My saved API answer',
@@ -270,6 +290,10 @@ async function main() {
   await parent.page.goto(base + `/parent/results?child=${id(112)}&school=${id(1)}`);
   await parent.page.locator('tr').filter({ hasText: 'Connected integration assessment' }).waitFor();
   console.log('PASS teacher grading and explicit result release to student and verified parent');
+  await parent.page.goto(base + `/parent/lessons?child=${id(122)}&school=${id(2)}`);
+  await parent.page.getByText('Introduction', { exact: true }).waitFor();
+  assert.equal(await parent.page.getByText('Teacher draft', { exact: true }).count(), 0);
+  console.log('PASS verified parent learning across schools and draft exclusion');
   await activate(teacher);
   await teacher.page.goto(base + '/teacher/resources/new');
   await teacher.page.locator('[name=title]').fill('Connected worksheet');
@@ -288,7 +312,14 @@ async function main() {
   await activate(student);
   await student.page.goto(base + '/student/resources/' + resourceId);
   const downloaded = student.page.waitForEvent('download');
+  const downloadResponse = student.page.waitForResponse(
+    (response) => /\/api\/wasl\/files\/[^/]+\/content$/.test(response.url()),
+  );
   await student.page.getByRole('button', { name: 'Download file', exact: true }).click();
+  const headers = (await downloadResponse).headers();
+  assert.equal(headers['cache-control'], 'private, no-store');
+  assert.equal(headers['x-content-type-options'], 'nosniff');
+  assert.match(headers['content-disposition'], /^attachment;/i);
   const download = await downloaded;
   const file = await download.path();
   assert.deepEqual(await require('node:fs/promises').readFile(file), testPdf);
@@ -347,7 +378,10 @@ async function main() {
   );
   await activate(student);
   await student.page.goto(base + '/student/announcements');
-  await student.page.getByRole('alert').waitFor();
+  await student.page
+    .getByRole('alert')
+    .filter({ hasText: 'Could not reach the service. Please retry.' })
+    .waitFor();
   assert.equal(
     await student.page.getByText('Connected class announcement', { exact: true }).count(),
     0,

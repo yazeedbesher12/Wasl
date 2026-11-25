@@ -9,6 +9,12 @@
     "test": "turbo run test",
     "typecheck": "turbo run typecheck"
   },
+  "pnpm": {
+    "overrides": {
+      "next@15.5.29>postcss": "8.5.32",
+      "next@15.5.29>sharp": "0.35.5"
+    }
+  },
   "devDependencies": {
     "turbo": "^2.5.4"
   }
