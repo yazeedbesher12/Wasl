@@ -11,7 +11,7 @@ const { FoundationService } = require('../src/foundation/foundation.service');
 const { PrismaStorage } = require('../src/foundation/prisma.adapter');
 
 const marker = process.env.WASL_LAB_ID;
-const roles = { auth: 'wasl_auth', platform: 'wasl_platform', tenant: 'wasl_tenant' };
+const roles = { auth: 'wasl_auth', platform: 'wasl_platform', tenant: 'wasl_tenant', academicAdmin: 'wasl_academic_admin', assessmentStaff: 'wasl_assessment_staff' };
 
 function target(key, role) {
   const url = new URL(process.env[key] ?? '');
@@ -41,6 +41,8 @@ test('actual PostgreSQL execution credentials enforce the identity boundary', as
     auth: target('AUTH_DATABASE_URL', roles.auth),
     platform: target('PLATFORM_DATABASE_URL', roles.platform),
     tenant: target('DATABASE_URL', roles.tenant),
+    academicAdmin: target('ACADEMIC_ADMIN_DATABASE_URL', roles.academicAdmin),
+    assessmentStaff: target('ASSESSMENT_STAFF_DATABASE_URL', roles.assessmentStaff),
   };
   assert.equal(new Set(Object.values(urls).map(url => url.port)).size, 1);
   assert.ok(!process.env.MIGRATION_DATABASE_URL, 'Migration credentials must be absent');
@@ -53,7 +55,8 @@ test('actual PostgreSQL execution credentials enforce the identity boundary', as
   assert.ok(administrator, 'Fictional platform administrator fixture');
   const [platformUser] = await platform.$queryRaw`SELECT id, email FROM public.users WHERE id = ${administrator.userId}::uuid`;
   const platformActor = { sub: platformUser.id, email: platformUser.email, schoolId: null, role: 'PLATFORM_ADMIN', membershipId: administrator.id };
-  const storage = await PrismaStorage.open(Object.fromEntries(Object.entries(urls).map(([key, url]) => [key, url.href])));
+  const storage = await PrismaStorage.open(Object.fromEntries(Object.entries(urls).map(([key, url]) => [key, url.href])),
+    Buffer.from(process.env.WASL_SUBJECT_PROOF_KEY ?? '', 'hex'));
   t.after(() => storage.onModuleDestroy());
   const foundation = new FoundationService(storage);
   const school = await foundation.createSchool(platformActor, { name: 'Fictional DB-02 School' });

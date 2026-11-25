@@ -7,7 +7,7 @@ import { requireActor } from './authorization';
 import type { AcademicKind, AcademicMap, AcademicYear, Enrollment, ParentLink, PersonProfile, Section, SectionSubject, Semester } from './entities';
 import { academicDto, linkDto, memberDto, schoolDto, userDto } from './mapping';
 import { STORAGE } from './repositories';
-import type { FoundationStorage, Repositories } from './repositories';
+import type { FoundationStorage, Repositories, SubjectAccess } from './repositories';
 import type { AcademicListDto, CreateLinkDto, CreateMembershipDto, CreateSchoolDto, CreateUserDto, LinkListDto, ListDto, PeopleListDto, ProfileDto, SchoolAdministratorDto, SchoolListDto, UpdateSchoolDto } from './dto';
 
 const notFound = () => new NotFoundException('Record not found');
@@ -27,9 +27,10 @@ export function pageOf<T extends { id: string }>(rows: T[], query: ListDto, name
 @Injectable()
 export class FoundationService {
   constructor(@Inject(STORAGE) private storage: FoundationStorage) {}
-  private school<T>(actor: AuthUser, roles: readonly Role[], work: (r: Repositories) => Promise<T>, kind: 'school' | 'school-administration' = 'school') {
+  private school<T>(actor: AuthUser, roles: readonly Role[], work: (r: Repositories) => Promise<T>, kind: 'school' | 'school-administration' | 'academic-administration' = 'school', access?: SubjectAccess) {
     if (!actor.schoolId) throw new ForbiddenException('An active school role is required');
-    return this.storage.run({ kind, userId: actor.sub, schoolId: actor.schoolId }, async r => { await requireActor(r, actor, roles); return work(r); });
+    const subjects = access && { membershipId: actor.membershipId, access };
+    return this.storage.run({ kind, userId: actor.sub, schoolId: actor.schoolId, subjects }, async r => { await requireActor(r, actor, roles); return work(r); });
   }
   private platform<T>(actor: AuthUser, work: (r: Repositories) => Promise<T>, targetSchoolId: string | null = null) {
     if (actor.role !== 'PLATFORM_ADMIN') throw new ForbiddenException();
@@ -151,13 +152,16 @@ export class FoundationService {
         (!q.status || 'status' in row && row.status === q.status));
       const page = pageOf(rows, q, row => 'name' in row ? row.name : 'nameEn' in row ? row.nameEn + ' ' + row.nameAr : row.id);
       return { ...page, items: page.items.map(row => academicDto(kind, row)) };
-    });
+    }, 'school', { operation: 'read' });
   }
-  getAcademic<K extends AcademicKind>(actor: AuthUser, kind: K, id: string) { return this.school(actor, ['SCHOOL_ADMIN', 'TEACHER', 'STUDENT'], async r => { const row = (await this.visibleAcademic(r, actor, kind)).find(v => v.id === id); if (!row) throw notFound(); return academicDto(kind, row); }); }
+  getAcademic<K extends AcademicKind>(actor: AuthUser, kind: K, id: string) { return this.school(actor, ['SCHOOL_ADMIN', 'TEACHER', 'STUDENT'], async r => { const row = (await this.visibleAcademic(r, actor, kind)).find(v => v.id === id); if (!row) throw notFound(); return academicDto(kind, row); }, 'school', { operation: 'read' }); }
   saveAcademic<K extends AcademicKind>(actor: AuthUser, kind: K, input: AcademicWrite, id?: string): Promise<AcademicDtoMap[K]> {
+    const recordId = id ?? randomUUID();
+    const subjectAccess: SubjectAccess | undefined = kind === 'subjects' ? { operation: id ? 'update' : 'insert', subjectId: recordId }
+      : kind === 'sectionSubjects' ? { operation: 'read' } : undefined;
     return this.school(actor, ['SCHOOL_ADMIN'], async r => {
       const old = id ? await r.academics.get(kind, id) : null; if (id && !old) throw notFound();
-      const base = { id: old?.id ?? randomUUID(), schoolId: actor.schoolId! };
+      const base = { id: recordId, schoolId: actor.schoolId! };
       const builders = {
         academicYears: () => { const o = old as AcademicYear | null; return { ...base, name: requireValue(input.name ?? o?.name), startDate: input.startDate !== undefined ? dateOnly(input.startDate) : requireValue(o?.startDate), endDate: input.endDate !== undefined ? dateOnly(input.endDate) : requireValue(o?.endDate), archived: input.archived ?? o?.archived ?? false }; },
         semesters: () => { const o = old as Semester | null; const academicYearId = requireValue(input.academicYearId ?? o?.academicYearId); immutable(o?.academicYearId, academicYearId); return { ...base, academicYearId, name: requireValue(input.name ?? o?.name), startDate: input.startDate !== undefined ? dateOnly(input.startDate) : requireValue(o?.startDate), endDate: input.endDate !== undefined ? dateOnly(input.endDate) : requireValue(o?.endDate) }; },
@@ -169,7 +173,7 @@ export class FoundationService {
       };
       const row = builders[kind]() as AcademicMap[K]; await this.validateAcademic(r, kind, row, !old);
       return academicDto(kind, old ? await r.academics.update(kind, row) : await r.academics.create(kind, row));
-    });
+    }, ['academicYears', 'grades', 'sections', 'sectionSubjects', 'enrollments'].includes(kind) ? 'academic-administration' : 'school', subjectAccess);
   }
   private async validateAcademic<K extends AcademicKind>(r: Repositories, kind: K, row: AcademicMap[K], create: boolean) {
     const year = async (id: string, open = false) => { const y = await r.academics.get('academicYears', id); if (!y) throw notFound(); if (open && y.archived) throw new ConflictException('Academic year is archived'); return y; };
@@ -202,7 +206,7 @@ export class FoundationService {
     const rows = await Promise.all((await this.visibleAcademic(r, actor, 'sectionSubjects')).map(a => this.classDto(r, a)));
     const page = pageOf(rows.map(c => ({ ...c, id: c.assignment.id })), q, c => c.subject.nameEn + ' ' + c.subject.nameAr + ' ' + c.section.name);
     return { ...page, items: page.items.map(({ id: _id, ...c }) => c) };
-  }); }
+  }, 'school', { operation: 'read' }); }
   roster(actor: AuthUser, assignmentId: string, q: ListDto) { return this.school(actor, ['SCHOOL_ADMIN', 'TEACHER'], async r => {
     const assignment = (await this.visibleAcademic(r, actor, 'sectionSubjects')).find(a => a.id === assignmentId); if (!assignment) throw notFound();
     const entries: (RosterEntryDto & { id: string })[] = [];
@@ -210,8 +214,8 @@ export class FoundationService {
       const student = await r.identity.personById(e.studentId); if (student) entries.push({ id: e.id, enrollment: academicDto('enrollments', e), student: { id: student.id, fullName: student.fullName } });
     }
     const page = pageOf(entries, q, e => e.student.fullName); return { ...page, items: page.items.map(({ id: _id, ...row }) => row) };
-  }); }
-  overview(actor: AuthUser) { return this.school(actor, ['SCHOOL_ADMIN'], r => this.overviewInside(r, actor)); }
+  }, 'school', { operation: 'read' }); }
+  overview(actor: AuthUser) { return this.school(actor, ['SCHOOL_ADMIN'], r => this.overviewInside(r, actor), 'school', { operation: 'read' }); }
   private async overviewInside(r: Repositories, actor: Pick<AuthUser, 'role' | 'sub' | 'schoolId'>, student?: PersonProfile): Promise<AcademicOverviewDto> {
     const school = await r.schools.get(actor.schoolId!); if (!school) throw notFound();
     const rows = await this.visibleAcademic(r, actor, 'sectionSubjects'); const enrollments = await this.visibleAcademic(r, actor, 'enrollments');
@@ -222,19 +226,20 @@ export class FoundationService {
   createLink(actor: AuthUser, input: CreateLinkDto) { return this.school(actor, ['SCHOOL_ADMIN'], async r => {
     if (input.parentId === input.studentId || !await r.people.eligible(input.parentId, 'PARENT') || !await r.people.eligible(input.studentId, 'STUDENT')) throw notFound();
     return linkDto(await r.links.create({ id: randomUUID(), schoolId: actor.schoolId!, parentId: input.parentId, studentId: input.studentId, status: 'PENDING', verifiedAt: null, createdAt: new Date() }));
-  }); }
+  }, 'academic-administration'); }
   linkStatus(actor: AuthUser, id: string, status: ParentLink['status']) { return this.school(actor, ['SCHOOL_ADMIN'], async r => {
     const link = await r.links.get(id); if (!link) throw notFound();
     if (status === 'VERIFIED' && (!await r.people.eligible(link.parentId, 'PARENT') || !await r.people.eligible(link.studentId, 'STUDENT'))) throw notFound();
     return linkDto(await r.links.update({ ...link, status, verifiedAt: status === 'VERIFIED' ? link.status === 'VERIFIED' ? link.verifiedAt ?? new Date() : new Date() : null }));
-  }); }
+  }, 'academic-administration'); }
   private async parentLinks(actor: AuthUser) {
     if (actor.role !== 'PARENT') throw new ForbiddenException();
     // Exact own-parent identity lookup without tenant bypass. No arbitrary child lookup here.
     return this.storage.run({ kind: 'parent-list', userId: actor.sub, schoolId: null }, async r => { await requireActor(r, actor, ['PARENT']); return r.links.forParent(actor.sub); });
   }
   private parentChild<T>(actor: AuthUser, link: ParentLink, work: (r: Repositories, student: PersonProfile) => Promise<T>) {
-    return this.storage.run({ kind: 'school', userId: actor.sub, schoolId: link.schoolId }, async r => {
+    return this.storage.run({ kind: 'school', userId: actor.sub, schoolId: link.schoolId,
+      subjects: { membershipId: actor.membershipId, access: { operation: 'read', childId: link.studentId } } }, async r => {
       await requireActor(r, actor, ['PARENT']);
       const current = (await r.links.forParent(actor.sub)).find(l => l.id === link.id && l.studentId === link.studentId && l.status === 'VERIFIED');
       if (!current || !(await r.schools.get(link.schoolId))?.active || !await r.people.eligible(actor.sub, 'PARENT') || !await r.people.eligible(link.studentId, 'STUDENT')) throw notFound();

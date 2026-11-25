@@ -10,7 +10,7 @@ describe('Prisma identity projection', () => {
   const tx = { user: { findUnique, create, update } };
   const prisma = { transaction: (_scope: StorageScope, work: (transaction: typeof tx) => unknown) => work(tx) };
   const pool = prisma as unknown as PrismaService;
-  const storage = new PrismaStorage({ auth: pool, platform: pool, tenant: pool });
+  const storage = new PrismaStorage({ auth: pool, platform: pool, tenant: pool, academicAdmin: pool, assessmentStaff: pool });
   const school = { kind: 'school', userId: 'actor', schoolId: 'school' } as const;
   const person = {
     id: 'person', email: 'person@example.test', fullName: 'Fictional Person',

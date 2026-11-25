@@ -5,7 +5,14 @@ import type { AcademicKind, AcademicMap, Lesson, Membership, ParentLink, Person,
 
 export const STORAGE = Symbol('WASL_PHASE1_STORAGE');
 /** These scopes are server-created only; never accepted from an HTTP request body. */
-export interface StorageScope { kind: 'authentication' | 'identity' | 'platform' | 'school-administration' | 'school' | 'parent-list'; userId: string | null; schoolId: string | null }
+export type SubjectAccess = { operation: 'read'; childId?: string } | { operation: 'insert' | 'update'; subjectId: string };
+export interface StorageScope {
+  kind: 'authentication' | 'identity' | 'platform' | 'school-administration' | 'academic-administration' | 'assessment-staff' | 'school' | 'parent-list';
+  userId: string | null;
+  schoolId: string | null;
+  subjects?: { membershipId: string; access: SubjectAccess };
+  assessment?: { membershipId: string; operation: 'draft' | 'submit' | 'results'; targetId: string };
+}
 export interface IdentityRepository {
   personById(id: string): Promise<PersonProfile | null>;
   personByEmail(email: string): Promise<PersonProfile | null>;
@@ -69,6 +76,8 @@ export interface QuestionRepository {
   updateBank(row: QuestionBank): Promise<QuestionBank>;
   listQuestions(): Promise<QuestionWithOptions[]>;
   getQuestion(id: string): Promise<QuestionWithOptions | null>;
+  listSafeQuestions(): Promise<import('./entities').SafeQuestionWithOptions[]>;
+  getSafeQuestion(id: string): Promise<import('./entities').SafeQuestionWithOptions | null>;
   createQuestion(row: Question, options: QuestionOption[]): Promise<QuestionWithOptions>;
   updateQuestion(row: Question, options: QuestionOption[]): Promise<QuestionWithOptions>;
   isQuestionLocked(id: string): Promise<boolean>;

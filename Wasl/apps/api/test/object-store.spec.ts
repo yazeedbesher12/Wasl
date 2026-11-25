@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -47,6 +48,7 @@ describe('Private binary object stores', () => {
 
   it('validates S3 configuration and refuses development local storage in production', () => {
     const base = { NODE_ENV: 'production', WASL_STORAGE_DRIVER: 'prisma', JWT_ACCESS_SECRET: 'access-' + 'a'.repeat(40), JWT_REFRESH_SECRET: 'refresh-' + 'b'.repeat(40), DATABASE_URL: 'postgresql://wasl_tenant:p@example.test/wasl', AUTH_DATABASE_URL: 'postgresql://wasl_auth:p@example.test/wasl', PLATFORM_DATABASE_URL: 'postgresql://wasl_platform:p@example.test/wasl', CORS_ORIGINS: 'https://school.example.test' };
+    Object.assign(base, { WASL_SUBJECT_PROOF_KEY: randomBytes(32).toString('hex'), ACADEMIC_ADMIN_DATABASE_URL: 'postgresql://wasl_academic_admin:p@example.test/wasl', ASSESSMENT_STAFF_DATABASE_URL: 'postgresql://wasl_assessment_staff:p@example.test/wasl' });
     expect(() => validateEnvironment({ ...base, WASL_FILE_STORAGE_DRIVER: 'local' })).toThrow('private S3');
     expect(() => validateEnvironment(base)).toThrow('S3_BUCKET');
     const configured = { ...base, S3_BUCKET: 'wasl-private', S3_ACCESS_KEY_ID: 'test-key', S3_SECRET_ACCESS_KEY: 'test-secret', S3_ENDPOINT: 'https://objects.example.test' };

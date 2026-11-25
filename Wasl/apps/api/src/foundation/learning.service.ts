@@ -18,9 +18,10 @@ const notFound = () => new NotFoundException('Record not found');
 export class LearningService {
   constructor(@Inject(STORAGE) private storage: FoundationStorage) {}
 
-  private school<T>(actor: AuthUser, roles: readonly ('SCHOOL_ADMIN' | 'TEACHER' | 'STUDENT')[], work: (repositories: Repositories) => Promise<T>) {
+  private school<T>(actor: AuthUser, roles: readonly ('SCHOOL_ADMIN' | 'TEACHER' | 'STUDENT')[], work: (repositories: Repositories) => Promise<T>, staff = false) {
     if (!actor.schoolId) throw new ForbiddenException('An active school role is required');
-    return this.storage.run({ kind: 'school', userId: actor.sub, schoolId: actor.schoolId }, async repositories => {
+    return this.storage.run({ kind: staff ? 'assessment-staff' : 'school', userId: actor.sub, schoolId: actor.schoolId,
+      subjects: { membershipId: actor.membershipId, access: { operation: 'read' } } }, async repositories => {
       await requireActor(repositories, actor, roles);
       return work(repositories);
     });
@@ -193,14 +194,14 @@ export class LearningService {
       const ownerAssigned = (await this.openAssignments(repositories)).some(assignment => assignment.subjectId === input.subjectId && assignment.teacherId === ownerId);
       if (!ownerAssigned) throw new BadRequestException('The owner must teach this subject in an active academic year');
       return questionBankDto(await repositories.questions.createBank({ id: randomUUID(), schoolId: actor.schoolId!, subjectId: input.subjectId, ownerId, name: input.name }));
-    });
+    }, true);
   }
 
   updateQuestionBank(actor: AuthUser, id: string, input: UpdateQuestionBankDto): Promise<QuestionBankDto> {
     return this.school(actor, ['SCHOOL_ADMIN', 'TEACHER'], async repositories => {
       const old = await this.writableBank(repositories, actor, id);
       return questionBankDto(await repositories.questions.updateBank({ ...old, name: input.name ?? old.name }));
-    });
+    }, true);
   }
 
   private validateOptions(type: QuestionType, values: QuestionOptionInputDto[]): QuestionOptionInputDto[] {
@@ -225,7 +226,7 @@ export class LearningService {
       const rows = (await repositories.questions.listQuestions()).filter(question => question.questionBankId === bankId && (!query.type || question.type === query.type));
       const page = pageOf(rows, query, question => question.text);
       return { ...page, items: page.items.map(questionAuthorDto) };
-    });
+    }, true);
   }
 
   getQuestion(actor: AuthUser, id: string): Promise<QuestionAuthorDto> {
@@ -234,7 +235,7 @@ export class LearningService {
       if (!question) throw notFound();
       await this.readableBank(repositories, actor, question.questionBankId);
       return questionAuthorDto(question);
-    });
+    }, true);
   }
 
   createQuestion(actor: AuthUser, bankId: string, input: CreateQuestionDto): Promise<QuestionAuthorDto> {
@@ -244,7 +245,7 @@ export class LearningService {
       const id = randomUUID();
       const row: Question = { id, schoolId: actor.schoolId!, questionBankId: bankId, type: input.type, text: input.text, points: input.points ?? 1 };
       return questionAuthorDto(await repositories.questions.createQuestion(row, this.buildOptions(actor, id, values)));
-    });
+    }, true);
   }
 
   updateQuestion(actor: AuthUser, id: string, input: UpdateQuestionDto): Promise<QuestionAuthorDto> {
@@ -258,7 +259,7 @@ export class LearningService {
       const values = this.validateOptions(type, rawOptions);
       const row: Question = { id, schoolId: old.schoolId, questionBankId: old.questionBankId, type, text: input.text ?? old.text, points: input.points ?? old.points };
       return questionAuthorDto(await repositories.questions.updateQuestion(row, this.buildOptions(actor, id, values)));
-    });
+    }, true);
   }
 
   private async studentQuestionIds(repositories: Repositories, actor: AuthUser): Promise<Set<string>> {
@@ -276,7 +277,7 @@ export class LearningService {
       const visibleIds = await this.studentQuestionIds(repositories, actor);
       const subjects = await this.accessibleSubjectIds(repositories, actor);
       const bankIds = new Set((await repositories.questions.listBanks()).filter(bank => subjects.has(bank.subjectId)).map(bank => bank.id));
-      const rows = (await repositories.questions.listQuestions()).filter(question => visibleIds.has(question.id) && bankIds.has(question.questionBankId) && (!query.questionBankId || question.questionBankId === query.questionBankId) && (!query.type || question.type === query.type));
+      const rows = (await repositories.questions.listSafeQuestions()).filter(question => visibleIds.has(question.id) && bankIds.has(question.questionBankId) && (!query.questionBankId || question.questionBankId === query.questionBankId) && (!query.type || question.type === query.type));
       const page = pageOf(rows, query, question => question.text);
       return { ...page, items: page.items.map(questionSafeDto) };
     });
@@ -284,7 +285,7 @@ export class LearningService {
 
   getStudentQuestion(actor: AuthUser, id: string): Promise<QuestionSafeDto> {
     return this.school(actor, ['STUDENT'], async repositories => {
-      const question = await repositories.questions.getQuestion(id);
+      const question = await repositories.questions.getSafeQuestion(id);
       if (!question) throw notFound();
       const bank = await repositories.questions.getBank(question.questionBankId);
       if (!bank || !(await this.accessibleSubjectIds(repositories, actor)).has(bank.subjectId) || !(await this.studentQuestionIds(repositories, actor)).has(id)) throw notFound();

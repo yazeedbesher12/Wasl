@@ -89,6 +89,78 @@ membership. The tenant login has no access to the administrative schema. Custom
 settings remain untrusted. DB-01 still requires database-enforced school scoping
 for ordinary tenant records and identity profile reads.
 
+### Subjects isolation prototype
+
+The two additive Subjects migrations protect the authorization inputs and enable
+forced RLS on `subjects`. The administrator provisions `wasl_academic_admin`
+as a restricted non-owner login with no role memberships, and
+`wasl_subject_verifier` as a restricted `NOLOGIN` role. The migrator needs
+permission to transfer ownership of the verifier function to that role. The
+database needs `pgcrypto` in the protected schema installed by the migration.
+The academic-administration connection handles year, grade, section, assignment,
+enrollment, and parent-link writes after the API rechecks the school administrator
+within the same transaction. It uses `ACADEMIC_ADMIN_DATABASE_URL`.
+
+Give the trusted API a separate 32-byte `WASL_SUBJECT_PROOF_KEY` through the secret
+store. Provision the same key into `wasl_subject_scope.signing_key` through a
+protected administrator connection. Use a different key per database deployment
+and from either JWT key. The tenant login cannot read the key table, use the
+crypto schema, or assume the verifier or academic-administration identity. This
+prototype uses one active key and needs a coordinated key rotation procedure.
+
+The API signs a typed operation for the authenticated actor against the pinned
+Prisma transaction. The verifier checks the HMAC, runtime login, database OID,
+backend PID, full transaction ID, expiration, active account and membership,
+school, and operation. It checks teacher assignment, student enrollment, or
+the specific verified parent-child link for reads. Insert and update proofs
+cover one subject ID. There is no delete policy. Custom settings only carry
+the proof and tag. They confer no authority without independent verification.
+
+The proof expires after 15 seconds. Even a captured valid proof cannot be used
+on another connection or in the next transaction on a reused connection.
+Serializable retries get a fresh binding. A proof is reusable within its own
+transaction for its existing scope, so the design assumes that any SQL running
+inside an authorized transaction can use that transaction's exact capability.
+The NestJS process and the database owner remain trusted. This prototype has no
+independent issuer security boundary against compromise of the API process.
+
+Other tenant tables still need their own scoped policies. In particular, the
+tenant grants on learner metadata and existing file and communication policies
+still need review. The prototypes below are for disposable lab verification.
+
+### Assessment sensitive-column prototype
+
+| Relation and fields | Intended read and write access | Boundary in this prototype |
+| --- | --- | --- |
+| `questions` and `question_banks` prompt, points, owner and subject | Staff authoring and assignment-aware learner delivery | Tenant retains metadata reads. The staff connection owns API writes. Authoring validates ownership. |
+| `question_options.is_correct`, `question_options.text` | Authors read and replace keys. Learners receive multiple-choice and true/false option labels. Short-answer option text is an accepted answer. | Tenant has no base-table grant. The learner view omits correctness and filters short-answer rows. Staff authoring uses the base table. |
+| `assessment_questions` links and ordering | Staff attaches eligible questions. Learners use links for an assigned assessment during delivery. | Tenant retains link reads. Staff alone changes links. Submission RLS checks that an inserted answer references an attached question. |
+| `assessments.status`, `opens_at`, `due_at`, `results_released_at` | Learners check delivery and release state. Assigned teachers manage transitions. | Tenant reads metadata. The staff role controls state writes. The released-grade command checks persisted release state. |
+| `submissions.score`, `feedback`, `graded_at`; `answers.score` | Staff reads and writes grades. Students and verified parents receive only released results. | Tenant raw reads and writes are revoked. The release command verifies proof, enrollment, recipient and release state. |
+| `submissions` identity, status and timestamp; `answers.response`, `file_key` | Students submit their own work. Assigned staff reads submissions for grading. | Tenant reads non-grade columns and writes only authorized open drafts through verified write policies. Raw cross-school reads of these non-grade columns remain a DB-01 gap. |
+| `users.password_hash`; `refresh_tokens.token_hash` and session lifecycle | Authentication uses verifier and session data. Provisioning writes a new password verifier through DB-02. | Existing auth and platform grants remain separate. Tenant reads only profile columns and has no refresh grants. |
+| `memberships` assignments, active state and role | Scoped API eligibility and administrator lifecycle management | Existing DB-02 read and write boundaries remain. Raw tenant membership visibility still requires DB-01 work. |
+| `file_objects` storage key, owner, filename and metadata | Authorized upload and download workflows and assessment attachment validation | Existing grants and policies remain. The assessment prototype does not change storage access. |
+| `notifications` recipient, student and entity IDs, payload and read status | Originating actions create messages. Recipients read or mark them. | Existing tenant grants and school policy remain. Staff assessment transitions can insert notifications in the same transaction. |
+| `schools` profiles and `parent_student_links` identities, verification state and time | Platform manages schools. Authorized school administrators verify links. | School writes stay with platform. Link writes stay with the academic-admin provider. Raw profile and relationship reads need DB-01 scoping. |
+| `academic_years`, `semesters`, `grades`, `sections`, `subjects`, `section_subjects`, `enrollments` | Staff manage school structures, teacher assignments and enrollment. Learners and parents read class information relevant to them. | Subject RLS and protected authority writes remain. Other school data and student enrollment reads need DB-01 scoping. |
+| `units`, `lessons`, `resources`, `announcements` content, publication state, URLs and storage references | Staff author and publish. Learners and parents receive eligible published content. | Existing grants and response rules remain. Draft visibility and direct tenant SQL access still need DB-01 scoping. |
+
+Provision `wasl_assessment_staff` as a restricted non-owner login with no role
+memberships and pass `ASSESSMENT_STAFF_DATABASE_URL` to the API. The API trusts
+this credential for authoring and grading and rechecks the authenticated actor's
+role, school and assignment in the same Serializable transaction. Keep the staff
+credential out of learner or tenant SQL sessions. It can query sensitive fields
+across schools if the trusted credential itself is compromised.
+
+Participation and released-grade proofs are distinct from Subjects proofs. Draft
+and final-submission proofs bind separate operations to one assessment. A results
+proof binds to a student or verified child. They use the same short-lived
+transaction binding. The verifier cannot mint proofs. Its release command returns only a released grade
+and scoped answer scores after independent verification. A proof remains usable
+for its exact purpose until expiration or transaction end. Existing learner DTO
+nulls and omitted correctness fields are preserved by safe database projections.
+
 For local PostgreSQL choose appropriate local TLS settings. For hosted PostgreSQL,
 confirm provider TLS, network access, pool/direct endpoint and connection limits.
 An application pooler must support interactive transactions and transaction-local
@@ -96,7 +168,7 @@ set_config values without leaking settings between requests. Use a direct endpoi
 for migrations; verify prepared-statement/pooler compatibility with Prisma 6.9.0.
 No particular hosting provider, connection or infrastructure was selected here.
 
-Prisma mode validates all three runtime URLs and checks their login identities. Connection or
+Prisma mode validates the runtime URLs and checks their login identities. Connection or
 configuration failure aborts startup; it never returns the fictional memory data.
 Once running, `/health` is liveness and `/health/ready` reports storage failures.
 Do not claim a successful SELECT 1 proves tenant policies or permissions.

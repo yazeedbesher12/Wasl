@@ -47,7 +47,7 @@ export class ParentLearningService {
   }
   private async summary(r: Repositories, a: Assessment) {
     const questions = await Promise.all(
-      (await r.assessments.questions(a.id)).map((q) => r.questions.getQuestion(q.questionId)),
+      (await r.assessments.questions(a.id)).map((q) => r.questions.getSafeQuestion(q.questionId)),
     );
     return {
       ...a,
@@ -111,7 +111,7 @@ export class ParentLearningService {
       const questions = [];
       if (studentCanReadQuestions(a))
         for (const link of await r.assessments.questions(a.id)) {
-          const q = await r.questions.getQuestion(link.questionId);
+          const q = await r.questions.getSafeQuestion(link.questionId);
           if (q) questions.push({ ...questionSafeDto(q), order: link.order });
         }
       return { ...(await this.summary(r, a)), questions };

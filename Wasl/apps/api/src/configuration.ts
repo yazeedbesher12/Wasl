@@ -19,7 +19,7 @@ export function validateEnvironment(env: Record<string, unknown>) {
   const days = Number(env.JWT_REFRESH_TTL_DAYS ?? 30);
   if (!Number.isInteger(days) || days < 1 || days > 90) throw new Error('JWT_REFRESH_TTL_DAYS must be 1..90');
   if (driver === 'prisma') {
-    const runtimeRoles = { DATABASE_URL: 'wasl_tenant', AUTH_DATABASE_URL: 'wasl_auth', PLATFORM_DATABASE_URL: 'wasl_platform' } as const;
+    const runtimeRoles = { DATABASE_URL: 'wasl_tenant', AUTH_DATABASE_URL: 'wasl_auth', PLATFORM_DATABASE_URL: 'wasl_platform', ACADEMIC_ADMIN_DATABASE_URL: 'wasl_academic_admin', ASSESSMENT_STAFF_DATABASE_URL: 'wasl_assessment_staff' } as const;
     const targets = Object.entries(runtimeRoles).map(([key, role]) => {
       try {
         const url = new URL(String(env[key] ?? ''));
@@ -32,6 +32,7 @@ export function validateEnvironment(env: Record<string, unknown>) {
     });
     if (new Set(targets).size !== 1) throw new Error('The runtime database roles must target the same database');
     if (env.MIGRATION_DATABASE_URL) throw new Error('MIGRATION_DATABASE_URL belongs in the migration process only');
+    if (!/^[a-f0-9]{64}$/.test(String(env.WASL_SUBJECT_PROOF_KEY ?? ''))) throw new Error('WASL_SUBJECT_PROOF_KEY must be a 32-byte hex key');
   }
   if (driver === 'memory') {
     const password = String(env.WASL_DEV_PASSWORD ?? '');

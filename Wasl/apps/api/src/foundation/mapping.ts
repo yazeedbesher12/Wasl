@@ -12,7 +12,7 @@ export const lessonDto = (l: Lesson) => ({ id: l.id, schoolId: l.schoolId, unitI
 export const resourceDto = (r: Resource): ResourceDto => ({ id: r.id, schoolId: r.schoolId, lessonId: r.lessonId, type: r.type, title: r.title, storageKey: r.storageKey, url: r.url, offlineAllowed: r.offlineAllowed, createdAt: r.createdAt.toISOString() });
 export const questionBankDto = (b: QuestionBank): QuestionBankDto => ({ id: b.id, schoolId: b.schoolId, subjectId: b.subjectId, ownerId: b.ownerId, name: b.name });
 export const questionAuthorDto = (q: QuestionWithOptions): QuestionAuthorDto => ({ id: q.id, schoolId: q.schoolId, questionBankId: q.questionBankId, type: q.type, text: q.text, points: q.points, options: q.options.map(o => ({ id: o.id, text: o.text, isCorrect: o.isCorrect })) });
-export const questionSafeDto = (q: QuestionWithOptions): QuestionSafeDto => ({ id: q.id, schoolId: q.schoolId, questionBankId: q.questionBankId, type: q.type, text: q.text, points: q.points, options: (q.type === 'SHORT_ANSWER' ? [] : q.options).map(o => ({ id: o.id, text: o.text })) });
+export const questionSafeDto = (q: import('./entities').SafeQuestionWithOptions): QuestionSafeDto => ({ id: q.id, schoolId: q.schoolId, questionBankId: q.questionBankId, type: q.type, text: q.text, points: q.points, options: (q.type === 'SHORT_ANSWER' ? [] : q.options).map(o => ({ id: o.id, text: o.text })) });
 export function academicDto<K extends ApiAcademicKind>(kind: K, row: AcademicMap[K]): AcademicDtoMap[K] {
   const base = { id: row.id, schoolId: row.schoolId };
   const map = {

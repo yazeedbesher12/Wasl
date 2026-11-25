@@ -104,6 +104,11 @@ export class MemoryStorage implements FoundationStorage {
         updateBank: async row => { const index = s.questionBanks.findIndex(v => v.id === row.id && scoped(v)); if (index < 0 || !scoped(row)) throw missing(); reference(s.academics.subjects.find(v => v.id === row.subjectId && scoped(v))); reference(eligible(row.ownerId, 'TEACHER')); s.questionBanks[index] = row; return row; },
         listQuestions: async () => s.questions.filter(scoped),
         getQuestion: async id => s.questions.find(row => row.id === id && scoped(row)) ?? null,
+        listSafeQuestions: async () => s.questions.filter(scoped).map(q => ({ ...q, options: q.options.map(({ isCorrect: _key, ...option }) => option) })),
+        getSafeQuestion: async id => {
+          const q = s.questions.find(row => row.id === id && scoped(row));
+          return q ? { ...q, options: q.options.map(({ isCorrect: _key, ...option }) => option) } : null;
+        },
         createQuestion: async (row, options) => { if (!scoped(row) || options.some(v => !scoped(v) || v.questionId !== row.id)) throw missing(); reference(s.questionBanks.find(v => v.id === row.questionBankId && scoped(v))); unique(s.questions.some(v => v.id === row.id)); unique(new Set(options.map(v => v.id)).size !== options.length); const result = { ...row, options }; s.questions.push(result); return result; },
         updateQuestion: async (row, options) => { const index = s.questions.findIndex(v => v.id === row.id && scoped(v)); if (index < 0 || !scoped(row) || options.some(v => !scoped(v) || v.questionId !== row.id)) throw missing(); reference(s.questionBanks.find(v => v.id === row.questionBankId && scoped(v))); unique(new Set(options.map(v => v.id)).size !== options.length); const result = { ...row, options }; s.questions[index] = result; return result; },
         isQuestionLocked: async id => s.assessmentQuestions.some(q => q.questionId === id && scoped(q) && s.assessments.some(a => a.id === q.assessmentId && scoped(a) && a.status !== 'DRAFT')),

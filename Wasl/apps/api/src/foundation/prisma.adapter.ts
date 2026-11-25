@@ -3,23 +3,23 @@ import { ConflictException, ForbiddenException, NotFoundException, ServiceUnavai
 import type { Prisma } from '@prisma/client';
 import { prismaAssessments } from './assessment.prisma.repository';
 import { PrismaService } from '../prisma/prisma.service';
-import type { AcademicKind, AcademicMap, Membership } from './entities';
+import type { AcademicKind, AcademicMap, Membership, SafeQuestionWithOptions } from './entities';
 import type { FoundationStorage, Repositories, StorageScope } from './repositories';
 
 const profileFields = { id: true, email: true, fullName: true, preferredLanguage: true, active: true, createdAt: true } satisfies Prisma.UserSelect;
 const credentialFields = { id: true, email: true, active: true, passwordHash: true } satisfies Prisma.UserSelect;
-const runtimeRoles = { auth: 'wasl_auth', platform: 'wasl_platform', tenant: 'wasl_tenant' } as const;
+const runtimeRoles = { auth: 'wasl_auth', platform: 'wasl_platform', tenant: 'wasl_tenant', academicAdmin: 'wasl_academic_admin', assessmentStaff: 'wasl_assessment_staff' } as const;
 type RuntimePools<T> = Record<keyof typeof runtimeRoles, T>;
 
 /** Fixed Phase 1 persistence operations, not an arbitrary ORM/query language. */
 export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
   readonly driver = 'prisma' as const;
   constructor(private pools: RuntimePools<PrismaService>) {}
-  static async open(urls: RuntimePools<string>) {
-    const pools = { auth: new PrismaService(urls.auth), platform: new PrismaService(urls.platform), tenant: new PrismaService(urls.tenant) };
+  static async open(urls: RuntimePools<string>, subjectKey: Buffer) {
+    const pools = { auth: new PrismaService(urls.auth), platform: new PrismaService(urls.platform), tenant: new PrismaService(urls.tenant, subjectKey), academicAdmin: new PrismaService(urls.academicAdmin, subjectKey), assessmentStaff: new PrismaService(urls.assessmentStaff, subjectKey) };
     const storage = new PrismaStorage(pools);
     try {
-      for (const pool of ['auth', 'platform', 'tenant'] as const) await pools[pool].connect(runtimeRoles[pool]);
+      for (const pool of Object.keys(runtimeRoles) as (keyof typeof runtimeRoles)[]) await pools[pool].connect(runtimeRoles[pool]);
       return storage;
     } catch {
       await storage.onModuleDestroy();
@@ -30,6 +30,8 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
   async ready() { await Promise.all(Object.values(this.pools).map(pool => pool.base.$queryRaw`SELECT 1`)); }
   async run<T>(scope: StorageScope, work: (r: Repositories) => Promise<T>): Promise<T> {
     const pool = scope.kind === 'authentication' ? this.pools.auth
+      : scope.kind === 'academic-administration' ? this.pools.academicAdmin
+      : scope.kind === 'assessment-staff' ? this.pools.assessmentStaff
       : scope.kind === 'platform' || scope.kind === 'school-administration' || scope.kind === 'identity' ? this.pools.platform
       : this.pools.tenant;
     for (let attempt = 0; ; attempt++) {
@@ -72,7 +74,8 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
       },
       subjects: {
         list: () => tx.subject.findMany({ where }), get: id => tx.subject.findFirst({ where: { id, schoolId } }),
-        create: data => tx.subject.create({ data }), update: data => tx.subject.update({ where: { id: data.id, schoolId }, data }),
+        create: data => tx.subject.create({ data }),
+        update: ({ id, nameAr, nameEn, code }) => tx.subject.update({ where: { id, schoolId }, data: { nameAr, nameEn, code } }),
       },
       sectionSubjects: {
         list: () => tx.sectionSubject.findMany({ where }), get: id => tx.sectionSubject.findFirst({ where: { id, schoolId } }),
@@ -87,7 +90,7 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
     return {
       files: prismaFiles(tx, schoolId),
       communication: prismaCommunication(tx, schoolId, scope.userId),
-      assessments: prismaAssessments(tx, schoolId),
+      assessments: prismaAssessments(tx, schoolId, scope.kind === 'assessment-staff', scope.assessment?.operation === 'results'),
       identity: {
         personById: id => tx.user.findUnique({ where: { id }, select: profileFields }),
         personByEmail: email => tx.user.findUnique({ where: { email }, select: profileFields }),
@@ -157,6 +160,21 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
         updateBank: data => { scoped(data); return tx.questionBank.update({ where: { id: data.id, schoolId }, data }); },
         listQuestions: () => tx.question.findMany({ where, include: { options: true } }),
         getQuestion: id => tx.question.findFirst({ where: { id, schoolId }, include: { options: true } }),
+        listSafeQuestions: async () => {
+          const questions = await tx.question.findMany({ where });
+          const options = await tx.$queryRaw<SafeQuestionWithOptions['options']>`
+            SELECT id, school_id AS "schoolId", question_id AS "questionId", text
+            FROM wasl_assessment.learner_options WHERE school_id = ${schoolId}::uuid`;
+          return questions.map(question => ({ ...question, options: options.filter(option => option.questionId === question.id) }));
+        },
+        getSafeQuestion: async id => {
+          const question = await tx.question.findFirst({ where: { id, schoolId } });
+          if (!question) return null;
+          const options = await tx.$queryRaw<SafeQuestionWithOptions['options']>`
+            SELECT id, school_id AS "schoolId", question_id AS "questionId", text
+            FROM wasl_assessment.learner_options WHERE school_id = ${schoolId}::uuid AND question_id = ${id}::uuid`;
+          return { ...question, options };
+        },
         createQuestion: async (data, options) => {
           scoped(data); options.forEach(scoped);
           await tx.question.create({ data });

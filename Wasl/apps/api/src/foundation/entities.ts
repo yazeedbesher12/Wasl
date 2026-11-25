@@ -24,6 +24,7 @@ export interface QuestionBank { id: string; schoolId: string; subjectId: string;
 export interface Question { id: string; schoolId: string; questionBankId: string; type: QuestionType; text: string; points: number }
 export interface QuestionOption { id: string; schoolId: string; questionId: string; text: string; isCorrect: boolean }
 export interface QuestionWithOptions extends Question { options: QuestionOption[] }
+export interface SafeQuestionWithOptions extends Question { options: Omit<QuestionOption, 'isCorrect'>[] }
 export interface AcademicMap { academicYears: AcademicYear; semesters: Semester; grades: Grade; sections: Section; subjects: Subject; sectionSubjects: SectionSubject; enrollments: Enrollment }
 export type AcademicKind = keyof AcademicMap;
 export interface Assessment { id: string; schoolId: string; sectionSubjectId: string; type: AssessmentType; title: string; instructions: string | null; opensAt: Date | null; dueAt: Date | null; status: AssessmentStatus; resultsReleasedAt: Date | null; createdAt: Date }

@@ -33,7 +33,7 @@ export async function authorizeUpload(r: Repositories, actor: AuthUser, input: F
   if (old && old.status !== 'IN_PROGRESS') throw new ConflictException('This assessment has already been submitted');
   const links = await r.assessments.questions(a.id);
   let acceptsFiles = false;
-  for (const q of links) if ((await r.questions.getQuestion(q.questionId))?.type === 'FILE_UPLOAD') acceptsFiles = true;
+  for (const q of links) if ((await r.questions.getSafeQuestion(q.questionId))?.type === 'FILE_UPLOAD') acceptsFiles = true;
   if (!acceptsFiles) throw new BadRequestException('The assessment has no file-upload question');
 }
 export async function authorizeFile(r: Repositories, actor: AuthUser, file: FileObject) {
