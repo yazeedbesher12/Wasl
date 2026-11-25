@@ -18,9 +18,20 @@ export function validateEnvironment(env: Record<string, unknown>) {
   if (!Number.isSafeInteger(seconds) || seconds < 60 || seconds > 86400) throw new Error('JWT_ACCESS_TTL must be between 60s and 24h');
   const days = Number(env.JWT_REFRESH_TTL_DAYS ?? 30);
   if (!Number.isInteger(days) || days < 1 || days > 90) throw new Error('JWT_REFRESH_TTL_DAYS must be 1..90');
-  if (driver === 'prisma') for (const key of ['DATABASE_URL', 'MIGRATION_DATABASE_URL']) {
-    try { const url = new URL(String(env[key] ?? '')); if (!['postgres:', 'postgresql:'].includes(url.protocol) || !url.hostname || !url.pathname.slice(1)) throw new Error(); }
-    catch { throw new Error(`${key} must be a PostgreSQL connection URL`); }
+  if (driver === 'prisma') {
+    const runtimeRoles = { DATABASE_URL: 'wasl_tenant', AUTH_DATABASE_URL: 'wasl_auth', PLATFORM_DATABASE_URL: 'wasl_platform' } as const;
+    const targets = Object.entries(runtimeRoles).map(([key, role]) => {
+      try {
+        const url = new URL(String(env[key] ?? ''));
+        if (!['postgres:', 'postgresql:'].includes(url.protocol) || !url.hostname || !url.pathname.slice(1) ||
+            decodeURIComponent(url.username) !== role || (url.searchParams.get('schema') ?? 'public') !== 'public') throw new Error();
+        return `${url.hostname}:${url.port || '5432'}/${decodeURIComponent(url.pathname.slice(1))}`;
+      } catch {
+        throw new Error(`${key} must be a PostgreSQL connection URL for ${role} in the public schema`);
+      }
+    });
+    if (new Set(targets).size !== 1) throw new Error('The runtime database roles must target the same database');
+    if (env.MIGRATION_DATABASE_URL) throw new Error('MIGRATION_DATABASE_URL belongs in the migration process only');
   }
   if (driver === 'memory') {
     const password = String(env.WASL_DEV_PASSWORD ?? '');

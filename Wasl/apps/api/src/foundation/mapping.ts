@@ -1,7 +1,7 @@
 import type { AcademicDtoMap, AcademicKind as ApiAcademicKind, ParentLinkDto, QuestionAuthorDto, QuestionBankDto, QuestionSafeDto, ResourceDto, SchoolDto, SchoolMembershipDto, UserDto } from '@wasl/shared';
-import type { AcademicMap, Lesson, Membership, ParentLink, Person, QuestionBank, QuestionWithOptions, Resource, School, Unit } from './entities';
+import type { AcademicMap, Lesson, Membership, ParentLink, PersonProfile, QuestionBank, QuestionWithOptions, Resource, School, Unit } from './entities';
 export const schoolDto = (s: School): SchoolDto => ({ id: s.id, name: s.name, nameAr: s.nameAr, locale: s.locale, active: s.active, createdAt: s.createdAt.toISOString() });
-export const userDto = (u: Person): UserDto => ({ id: u.id, email: u.email, fullName: u.fullName, preferredLanguage: u.preferredLanguage, active: u.active, createdAt: u.createdAt.toISOString() });
+export const userDto = (u: PersonProfile): UserDto => ({ id: u.id, email: u.email, fullName: u.fullName, preferredLanguage: u.preferredLanguage, active: u.active, createdAt: u.createdAt.toISOString() });
 export const memberDto = (m: Membership): SchoolMembershipDto => {
   if (!m.schoolId || m.role === 'PLATFORM_ADMIN') throw new Error('School membership mapping requires a school role');
   return { id: m.id, userId: m.userId, schoolId: m.schoolId, role: m.role, active: m.active, createdAt: m.createdAt.toISOString() };

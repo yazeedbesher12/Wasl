@@ -1,11 +1,13 @@
 import { memoryFiles, memoryCommunication } from './communication.memory.repository';
 import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import type { AcademicKind, AcademicMap, Membership } from './entities';
+import type { AcademicKind, AcademicMap, Membership, Person, PersonProfile } from './entities';
 import type { FoundationStorage, Repositories, StorageScope } from './repositories';
 import type { MemoryState } from './memory.seed';
 import { memoryAssessments } from './assessment.memory.repository';
 
 const missing = () => new NotFoundException('Record not found');
+const profile = ({ id, email, fullName, preferredLanguage, active, createdAt }: Person): PersonProfile => ({ id, email, fullName, preferredLanguage, active, createdAt });
+const credential = (user: Person | undefined) => user && { id: user.id, email: user.email, active: user.active, passwordHash: user.passwordHash };
 /** Serialized copy-on-write units of work: failures roll back and refresh claims cannot race. */
 export class MemoryStorage implements FoundationStorage {
   readonly driver = 'memory' as const; private tail: Promise<void> = Promise.resolve();
@@ -44,14 +46,25 @@ export class MemoryStorage implements FoundationStorage {
       communication: memoryCommunication(s, scope.schoolId, scope.userId),
       assessments: memoryAssessments(s, scope.schoolId),
       identity: {
-        personById: async id => person(id) ?? null, personByEmail: async email => s.users.find(u => u.email === email) ?? null,
+        personById: async id => { const user = person(id); return user ? profile(user) : null; },
+        personByEmail: async email => { const user = s.users.find(u => u.email === email); return user ? profile(user) : null; },
         membershipsFor: async id => s.memberships.filter(m => m.userId === id),
-        createPerson: async row => { unique(s.users.some(u => u.email === row.email || u.id === row.id)); s.users.push(row); return row; },
-        updateProfile: async (id, patch) => { const user = person(id); if (!user) throw missing(); Object.assign(user, patch); return user; },
-        refreshByHash: async hash => s.refresh.find(t => t.tokenHash === hash) ?? null,
-        createRefresh: async row => { reference(person(row.userId)); unique(s.refresh.some(t => t.tokenHash === row.tokenHash || t.id === row.id)); s.refresh.push(row); },
-        consumeRefresh: async (hash, at) => { const token = s.refresh.find(t => t.tokenHash === hash && !t.revokedAt && t.expiresAt > at); if (!token) return false; token.revokedAt = at; return true; },
-        revokeRefresh: async (hash, at) => { const token = s.refresh.find(t => t.tokenHash === hash && !t.revokedAt); if (token) token.revokedAt = at; },
+        createPerson: async row => { unique(s.users.some(u => u.email === row.email || u.id === row.id)); s.users.push(row); return profile(row); },
+        updateProfile: async (id, patch) => { const user = person(id); if (!user) throw missing(); Object.assign(user, patch); return profile(user); },
+      },
+      get authentication(): Repositories['authentication'] {
+        if (scope.kind !== 'authentication') throw new ForbiddenException();
+        return {
+          credentialById: async id => credential(person(id)) ?? null,
+          credentialByEmail: async email => credential(s.users.find(u => u.email === email)) ?? null,
+          refreshByHash: async hash => {
+            const token = s.refresh.find(t => t.tokenHash === hash);
+            return token ? { userId: token.userId, expiresAt: token.expiresAt, revokedAt: token.revokedAt } : null;
+          },
+          createRefresh: async row => { reference(person(row.userId)); unique(s.refresh.some(t => t.tokenHash === row.tokenHash || t.id === row.id)); s.refresh.push(row); },
+          consumeRefresh: async (hash, at) => { const token = s.refresh.find(t => t.tokenHash === hash && !t.revokedAt && t.expiresAt > at); if (!token) return false; token.revokedAt = at; return true; },
+          revokeRefresh: async (hash, at) => { const token = s.refresh.find(t => t.tokenHash === hash && !t.revokedAt); if (token) token.revokedAt = at; },
+        };
       },
       schools: {
         list: async () => { if (scope.kind !== 'platform') throw new ForbiddenException(); return s.schools; },

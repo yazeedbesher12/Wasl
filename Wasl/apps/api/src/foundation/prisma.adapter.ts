@@ -3,25 +3,45 @@ import { ConflictException, ForbiddenException, NotFoundException, ServiceUnavai
 import type { Prisma } from '@prisma/client';
 import { prismaAssessments } from './assessment.prisma.repository';
 import { PrismaService } from '../prisma/prisma.service';
-import type { AcademicKind, AcademicMap } from './entities';
+import type { AcademicKind, AcademicMap, Membership } from './entities';
 import type { FoundationStorage, Repositories, StorageScope } from './repositories';
+
+const profileFields = { id: true, email: true, fullName: true, preferredLanguage: true, active: true, createdAt: true } satisfies Prisma.UserSelect;
+const credentialFields = { id: true, email: true, active: true, passwordHash: true } satisfies Prisma.UserSelect;
+const runtimeRoles = { auth: 'wasl_auth', platform: 'wasl_platform', tenant: 'wasl_tenant' } as const;
+type RuntimePools<T> = Record<keyof typeof runtimeRoles, T>;
 
 /** Fixed Phase 1 persistence operations, not an arbitrary ORM/query language. */
 export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
   readonly driver = 'prisma' as const;
-  constructor(private prisma: PrismaService) {}
-  static async open(url: string) { const prisma = new PrismaService(url); try { await prisma.connect(); return new PrismaStorage(prisma); } catch (error) { await prisma.close(); throw error; } }
-  async onModuleDestroy() { await this.prisma.close(); }
-  async ready() { await this.prisma.base.$queryRaw`SELECT 1`; }
+  constructor(private pools: RuntimePools<PrismaService>) {}
+  static async open(urls: RuntimePools<string>) {
+    const pools = { auth: new PrismaService(urls.auth), platform: new PrismaService(urls.platform), tenant: new PrismaService(urls.tenant) };
+    const storage = new PrismaStorage(pools);
+    try {
+      for (const pool of ['auth', 'platform', 'tenant'] as const) await pools[pool].connect(runtimeRoles[pool]);
+      return storage;
+    } catch {
+      await storage.onModuleDestroy();
+      throw new Error('Prisma could not connect using the configured restricted execution identities');
+    }
+  }
+  async onModuleDestroy() { await Promise.allSettled(Object.values(this.pools).map(pool => pool.close())); }
+  async ready() { await Promise.all(Object.values(this.pools).map(pool => pool.base.$queryRaw`SELECT 1`)); }
   async run<T>(scope: StorageScope, work: (r: Repositories) => Promise<T>): Promise<T> {
+    const pool = scope.kind === 'authentication' ? this.pools.auth
+      : scope.kind === 'platform' || scope.kind === 'school-administration' || scope.kind === 'identity' ? this.pools.platform
+      : this.pools.tenant;
     for (let attempt = 0; ; attempt++) {
-      try { return await this.prisma.transaction(scope, tx => work(this.repositories(tx, scope))); }
+      try { return await pool.transaction(scope, tx => work(this.repositories(tx, scope))); }
       catch (error) {
         const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
-        if (code === 'P2034' && attempt < 2) continue;
-        if (code === 'P2002') throw new ConflictException('A record with these unique fields already exists');
-        if (code === 'P2003' || code === 'P2025') throw new NotFoundException('Referenced record not found');
-        if (code === 'P2034') throw new ConflictException('Concurrent change; retry the operation');
+        const sqlState = code === 'P2010' ? (error as { meta?: { code?: string } }).meta?.code : undefined;
+        const concurrent = code === 'P2034' || sqlState === '40001' || sqlState === '40P01';
+        if (concurrent && attempt < 2) continue;
+        if (code === 'P2002' || sqlState === '23505') throw new ConflictException('A record with these unique fields already exists');
+        if (code === 'P2003' || code === 'P2025' || sqlState === '23503') throw new NotFoundException('Referenced record not found');
+        if (concurrent) throw new ConflictException('Concurrent change; retry the operation');
         if (typeof code === 'string' && (/^P10\d\d$/.test(code) || code === 'P2024' || code === 'P2028')) throw new ServiceUnavailableException('Storage is unavailable');
         throw error;
       }
@@ -69,13 +89,22 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
       communication: prismaCommunication(tx, schoolId, scope.userId),
       assessments: prismaAssessments(tx, schoolId),
       identity: {
-        personById: id => tx.user.findUnique({ where: { id } }), personByEmail: email => tx.user.findUnique({ where: { email } }),
+        personById: id => tx.user.findUnique({ where: { id }, select: profileFields }),
+        personByEmail: email => tx.user.findUnique({ where: { email }, select: profileFields }),
         membershipsFor: userId => tx.membership.findMany({ where: { userId } }),
-        createPerson: data => tx.user.create({ data }), updateProfile: (id, data) => tx.user.update({ where: { id }, data }),
-        refreshByHash: tokenHash => tx.refreshToken.findUnique({ where: { tokenHash } }),
-        createRefresh: async data => { await tx.refreshToken.create({ data }); },
-        consumeRefresh: async (tokenHash, now) => (await tx.refreshToken.updateMany({ where: { tokenHash, revokedAt: null, expiresAt: { gt: now } }, data: { revokedAt: now } })).count === 1,
-        revokeRefresh: async (tokenHash, now) => { await tx.refreshToken.updateMany({ where: { tokenHash, revokedAt: null }, data: { revokedAt: now } }); },
+        createPerson: data => tx.user.create({ data, select: profileFields }),
+        updateProfile: (id, data) => tx.user.update({ where: { id }, data, select: profileFields }),
+      },
+      get authentication(): Repositories['authentication'] {
+        if (scope.kind !== 'authentication') throw new ForbiddenException();
+        return {
+          credentialById: id => tx.user.findUnique({ where: { id }, select: credentialFields }),
+          credentialByEmail: email => tx.user.findUnique({ where: { email }, select: credentialFields }),
+          refreshByHash: tokenHash => tx.refreshToken.findUnique({ where: { tokenHash }, select: { userId: true, expiresAt: true, revokedAt: true } }),
+          createRefresh: async data => { await tx.refreshToken.create({ data, select: { id: true } }); },
+          consumeRefresh: async (tokenHash, now) => (await tx.refreshToken.updateMany({ where: { tokenHash, revokedAt: null, expiresAt: { gt: now } }, data: { revokedAt: now } })).count === 1,
+          revokeRefresh: async (tokenHash, now) => { await tx.refreshToken.updateMany({ where: { tokenHash, revokedAt: null }, data: { revokedAt: now } }); },
+        };
       },
       schools: {
         list: () => { platform(); return tx.school.findMany(); }, get: id => tx.school.findUnique({ where: { id } }),
@@ -84,8 +113,22 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
       },
       people: {
         memberships: () => tx.membership.findMany({ where }),
-        createMembership: data => { if (data.schoolId !== scope.schoolId || data.role === 'PLATFORM_ADMIN') throw new NotFoundException(); return tx.membership.create({ data }); },
-        setMembershipActive: (id, active) => tx.membership.update({ where: { id, schoolId }, data: { active } }),
+        createMembership: async data => {
+          if (!data.schoolId || data.schoolId !== scope.schoolId || data.role === 'PLATFORM_ADMIN') throw new NotFoundException();
+          const [membership] = await tx.$queryRaw<Membership[]>`
+            INSERT INTO wasl_admin.school_memberships (id, user_id, school_id, role, active, created_at)
+            VALUES (${data.id}::uuid, ${data.userId}::uuid, ${data.schoolId}::uuid, ${data.role}::public."Role", ${data.active}, ${data.createdAt})
+            RETURNING id, user_id AS "userId", school_id AS "schoolId", role::text, active, created_at AS "createdAt"`;
+          return membership;
+        },
+        setMembershipActive: async (id, active) => {
+          const [membership] = await tx.$queryRaw<Membership[]>`
+            UPDATE wasl_admin.school_memberships SET active = ${active}
+            WHERE id = ${id}::uuid AND school_id = ${schoolId}::uuid
+            RETURNING id, user_id AS "userId", school_id AS "schoolId", role::text, active, created_at AS "createdAt"`;
+          if (!membership) throw new NotFoundException('Referenced record not found');
+          return membership;
+        },
         eligible: async (userId, role) => !!await tx.membership.findFirst({ where: { ...where, userId, role, active: true, user: { active: true } } }),
       },
       academics: {

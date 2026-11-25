@@ -4,7 +4,8 @@ import type { FilePurpose, NotificationPayload, NotificationType } from '@wasl/s
 
 // Persistence entities mirror schema.prisma. Dates remain Date objects inside adapters.
 export interface School { id: string; name: string; nameAr: string | null; locale: Locale; active: boolean; createdAt: Date }
-export interface Person { id: string; email: string; fullName: string; passwordHash: string; preferredLanguage: Locale; active: boolean; createdAt: Date }
+export interface PersonProfile { id: string; email: string; fullName: string; preferredLanguage: Locale; active: boolean; createdAt: Date }
+export interface Person extends PersonProfile { passwordHash: string }
 export interface Membership { id: string; userId: string; schoolId: string | null; role: Role; active: boolean; createdAt: Date }
 export interface ParentLink { id: string; schoolId: string; parentId: string; studentId: string; status: LinkStatus; verifiedAt: Date | null; createdAt: Date }
 export interface RefreshRecord { id: string; userId: string; tokenHash: string; expiresAt: Date; revokedAt: Date | null; createdAt: Date }

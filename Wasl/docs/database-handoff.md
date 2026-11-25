@@ -56,8 +56,9 @@ are placeholders, not credentials:
 ```dotenv
 NODE_ENV=development
 WASL_STORAGE_DRIVER=prisma
-DATABASE_URL=postgresql://runtime_user:runtime_password@database-host:5432/wasl?sslmode=require
-MIGRATION_DATABASE_URL=postgresql://migration_user:migration_password@database-host:5432/wasl?sslmode=require
+DATABASE_URL=postgresql://wasl_tenant:tenant_password@database-host:5432/wasl?sslmode=require
+AUTH_DATABASE_URL=postgresql://wasl_auth:auth_password@database-host:5432/wasl?sslmode=require
+PLATFORM_DATABASE_URL=postgresql://wasl_platform:platform_password@database-host:5432/wasl?sslmode=require
 JWT_ACCESS_SECRET=<distinct-random-secret-at-least-32-characters>
 JWT_REFRESH_SECRET=<another-random-secret-at-least-32-characters>
 JWT_ACCESS_TTL=15m
@@ -66,12 +67,27 @@ API_PORT=4000
 CORS_ORIGINS=https://your-web-origin.example
 ```
 
-DATABASE_URL is the non-owner application login with the minimum required table/
-sequence/function privileges. It must not be a superuser, owner or BYPASSRLS role.
-MIGRATION_DATABASE_URL is a separate direct connection for migration privileges;
-it is the Prisma datasource's existing directUrl convention and is never used by
-the API's query adapter. The future migration role owns/changes schema. Do not
-place either URL or JWT secret in NEXT_PUBLIC/EXPO_PUBLIC variables.
+For `202611260001_db_identity_boundary`, have the database administrator create
+the three named logins with distinct secrets, no memberships, and `NOSUPERUSER`,
+`NOBYPASSRLS`, `NOCREATEDB`, `NOCREATEROLE` and `NOREPLICATION`. The database owner
+applies the migration, which grants the specific rights below and revokes legacy
+`wasl_app` database and table grants. Provision the application URLs alongside a
+coordinated cutover from the old login. Set `MIGRATION_DATABASE_URL` in the separate
+Prisma CLI environment using the database owner and a direct endpoint. The API
+rejects this variable in Prisma mode. Keep all database URLs and JWT secrets
+server-side.
+
+| Runtime role | Granted access and trust |
+| --- | --- |
+| `wasl_tenant` | Reads profile columns, memberships and schools for application authorization. Writes tenant feature data through the tenant repositories. The role has no credential, refresh-token or identity administration grants. |
+| `wasl_auth` | Reads profile, credential, membership and school data for login and session checks. Inserts refresh rows and updates only their revocation timestamps. Compromise of this credential exposes password and refresh hashes. |
+| `wasl_platform` | Reads non-secret identity data, creates identities and updates profile fields, manages schools, and writes school memberships through `wasl_admin.school_memberships`. The view rejects platform memberships. The API is trusted to validate which actor may administer each school. Compromise of this credential permits school identity administration across schools. |
+
+School-admin identity writes use the administration connection for the entire
+Serializable operation, including rechecking the actor and writing the user and
+membership. The tenant login has no access to the administrative schema. Custom
+settings remain untrusted. DB-01 still requires database-enforced school scoping
+for ordinary tenant records and identity profile reads.
 
 For local PostgreSQL choose appropriate local TLS settings. For hosted PostgreSQL,
 confirm provider TLS, network access, pool/direct endpoint and connection limits.
@@ -80,7 +96,7 @@ set_config values without leaking settings between requests. Use a direct endpoi
 for migrations; verify prepared-statement/pooler compatibility with Prisma 6.9.0.
 No particular hosting provider, connection or infrastructure was selected here.
 
-Prisma mode validates both URL formats and connects explicitly. Connection or
+Prisma mode validates all three runtime URLs and checks their login identities. Connection or
 configuration failure aborts startup; it never returns the fictional memory data.
 Once running, `/health` is liveness and `/health/ready` reports storage failures.
 Do not claim a successful SELECT 1 proves tenant policies or permissions.
