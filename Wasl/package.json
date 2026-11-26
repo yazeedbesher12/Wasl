@@ -14,8 +14,11 @@
   "pnpm": {
     "overrides": {
       "@nestjs/platform-express>multer": "2.5.0",
+      "glob@13.0.6": "14.0.2",
+      "minimatch@10.2.6": "11.0.9",
       "next@15.5.29>postcss": "8.5.32",
-      "next@15.5.29>sharp": "0.35.5"
+      "next@15.5.29>sharp": "0.35.5",
+      "node-forge@1.4.2": "1.4.3"
     }
   },
   "devDependencies": {
