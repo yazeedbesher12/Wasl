@@ -7,4 +7,5 @@ export interface AuthUser {
   email: string;
   schoolId: string | null;
   role: Role;
+  sessionFamilyId?: string;
 }

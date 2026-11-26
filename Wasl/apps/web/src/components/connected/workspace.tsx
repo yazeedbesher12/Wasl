@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { ChildDto, ClassDto, Page, ParentLearningDto, Role } from '@wasl/shared';
+import type { ChildDto, ClassDto, Page, ParentFileContext, ParentLearningDto, Role } from '@wasl/shared';
 import { catalog, academics, roleNav, rowName, word, type Row } from '@/lib/connected/catalog';
 import { all, api, errorText } from '@/lib/connected/http';
 import { client, home, useApiSession } from './session';
@@ -407,13 +407,13 @@ function ConnectedScreen({ role, path }: { role: string; path: string[] }) {
     if (column === 'title' && ar && row.titleAr) return String(row.titleAr);
     return word(String(raw), ar);
   };
-  const download = async (storageKey: string) => {
+  const download = async (storageKey: string, context?: ParentFileContext) => {
     if (lock.current) return;
     lock.current = true;
     setBusy(true);
     try {
-      const f = await client.resolveFile(storageKey);
-      const blob = await client.downloadFile(f.id);
+      const f = await client.resolveFile(storageKey, context);
+      const blob = await client.downloadFile(f.id, context);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -588,7 +588,8 @@ function ConnectedScreen({ role, path }: { role: string; path: string[] }) {
             <button
               className="button"
               disabled={busy}
-              onClick={() => void download(record.storageKey as string)}
+              onClick={() => void download(record.storageKey as string,
+                role === 'parent' && child && school ? { studentId: child, schoolId: school } : undefined)}
             >
               {ar ? 'تنزيل الملف' : 'Download file'}
             </button>

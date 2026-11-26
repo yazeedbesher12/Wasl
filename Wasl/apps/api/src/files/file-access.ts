@@ -33,16 +33,18 @@ export async function authorizeUpload(r: Repositories, actor: AuthUser, input: F
   if (old && old.status !== 'IN_PROGRESS') throw new ConflictException('This assessment has already been submitted');
   const links = await r.assessments.questions(a.id);
   let acceptsFiles = false;
-  for (const q of links) if ((await r.questions.getQuestion(q.questionId))?.type === 'FILE_UPLOAD') acceptsFiles = true;
+  for (const q of links) if ((await r.questions.getSafeQuestion(q.questionId))?.type === 'FILE_UPLOAD') acceptsFiles = true;
   if (!acceptsFiles) throw new BadRequestException('The assessment has no file-upload question');
 }
-export async function authorizeFile(r: Repositories, actor: AuthUser, file: FileObject) {
+export async function authorizeFile(r: Repositories, actor: AuthUser, file: FileObject, studentId?: string) {
   if (file.purpose === 'LESSON_RESOURCE') {
     const lesson = file.lessonId && await r.content.getLesson(file.lessonId);
     const unit = lesson && await r.content.getUnit(lesson.unitId);
-    if (!lesson || !unit || !await canReadAssignment(r, actor, unit.sectionSubjectId)) throw missing();
+    if (!lesson || lesson.schoolId !== file.schoolId || !unit || unit.schoolId !== file.schoolId ||
+        !await canReadAssignment(r, actor, unit.sectionSubjectId, studentId)) throw missing();
     if (actor.role === 'SCHOOL_ADMIN' || actor.role === 'TEACHER') return;
-    const attached = (await r.content.listResources()).some(v => v.type === 'FILE' && v.storageKey === file.storageKey && v.lessonId === lesson.id);
+    const attached = (await r.content.listResources()).some(v =>
+      v.schoolId === file.schoolId && v.type === 'FILE' && v.storageKey === file.storageKey && v.lessonId === lesson.id);
     if (lesson.status !== 'PUBLISHED' || !attached) throw missing();
     return;
   }

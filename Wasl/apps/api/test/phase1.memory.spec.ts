@@ -1,7 +1,9 @@
 import type { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { randomUUID } from 'node:crypto';
+import { hash } from 'bcryptjs';
 import request from 'supertest';
+import { STORAGE, type FoundationStorage } from '../src/foundation/repositories';
 import { bearer, createMemoryApp, developmentId, login, TEST_PASSWORD } from './memory-harness';
 
 describe('Backend Phase 1 with isolated memory storage', () => {
@@ -16,6 +18,27 @@ describe('Backend Phase 1 with isolated memory storage', () => {
   });
 
   describe('health and authentication', () => {
+    it('does not create a session for an inactive account with valid credentials', async () => {
+      const userId = randomUUID();
+      const email = 'inactive@wasl.test';
+      const schoolId = developmentId(1);
+      const passwordHash = await hash(TEST_PASSWORD, 12);
+      const storage = app.get<FoundationStorage>(STORAGE);
+      await storage.run({ kind: 'school-administration', userId: null, schoolId }, async r => {
+        const createdAt = new Date();
+        await r.identity.createPerson({
+          id: userId, email, passwordHash, fullName: 'Fictional Inactive User',
+          preferredLanguage: 'en', active: false, createdAt,
+        });
+        await r.people.createMembership({
+          id: randomUUID(), userId, schoolId, role: 'STUDENT', active: true, createdAt,
+        });
+      });
+      const response = await request(app.getHttpServer()).post('/api/v1/auth/login').send({ email, password: TEST_PASSWORD });
+      expect(response.status).toBe(401);
+      expect(response.body).not.toHaveProperty('refreshToken');
+    });
+
     it('reports memory liveness and readiness without authentication', async () => {
       const health = await request(app.getHttpServer()).get('/api/v1/health');
       const ready = await request(app.getHttpServer()).get('/api/v1/health/ready');

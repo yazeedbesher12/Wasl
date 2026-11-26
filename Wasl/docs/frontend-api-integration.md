@@ -79,18 +79,38 @@ recheck verified links, active identities, school and enrollment on each request
 
 ## Web session deployment model
 
-The browser calls the Next Node proxy at `/api/wasl`. Access/refresh cookies are
-HttpOnly and SameSite=Lax, and Secure in production; JSON responses redact tokens.
-Writes validate the request Origin. The proxy bounds incoming bodies, forwards
-binary downloads privately and coalesces parallel refresh requests. Login,
-context switching and logout notify other tabs to refresh their identity.
+The browser calls the Next Node proxy at `/api/wasl`. Access and refresh
+cookies are HttpOnly and SameSite=Lax, and Secure in production. JSON responses
+redact tokens. Writes validate the request Origin. The proxy bounds request
+bodies, forwards binary downloads privately, and coalesces parallel refresh
+requests.
 
-The current proxy's revocation/refresh coordinator is **one Node process**, held
-across development recompilation. A server restart requires login. Run a single
-instance for this pre-database development stage. Before multi-instance/serverless
-deployment, replace the coordinator with a shared session store; cookie affinity
-alone does not cover restarts. `WASL_API_URL` is server-only and
-`WASL_WEB_ORIGIN` must be the exact external origin behind a reverse proxy.
+Login and school switching select an opaque web-session slot. Credential
+cookie names include that slot, so a delayed logout can clear its own cookies
+after a newer login without clearing the newer credentials. The HttpOnly
+selector can remain after sign-out. It cannot authenticate a request by itself.
+The proxy invalidates the local slot and clears its credential cookies even
+when the API cannot confirm revocation. It returns 503 for unconfirmed
+revocation. For five minutes, the same process can retry the exact API family
+revocation using the original slot, without restoring local authentication or
+keeping the refresh credential in the browser.
+
+Production requires `WASL_WEB_SESSION_MODE=single-instance`. Run one Next
+Node process and set `WASL_WEB_ORIGIN` to the exact public origin. The
+server-only API URL is `WASL_API_URL`. Restart discards local sessions and pending
+revocation retries. Browsers must sign in again, and an outstanding server-side
+revocation can remain unconfirmed. A browser that still holds its refresh
+credential can submit logout after a restart. Old fixed-name credential
+cookies require sign-in after the web cutover.
+
+The API persists session-family revocation, but does not provide a shared
+store for web slots, refresh coordination and pending retries. Do not run the
+proxy as multiple replicas, clustered Node workers or serverless instances
+with this mode. Cookie affinity cannot preserve retry state across restart
+or failover. Before scaling, select a shared server-side store with expiry,
+atomic slot invalidation and refresh coordination, and protected storage for
+pending revocation credentials. Validate recovery and two-instance behavior
+with the intended deployment topology.
 
 ## Verification commands
 
@@ -99,6 +119,7 @@ npx --yes pnpm@10.28.0 --filter @wasl/api test
 npx --yes pnpm@10.28.0 --filter @wasl/web typecheck
 npx --yes pnpm@10.28.0 --filter @wasl/mobile typecheck
 npx --yes pnpm@10.28.0 --filter @wasl/web build
+npx --yes pnpm@10.28.0 --filter @wasl/web test:session
 # Once per machine, install Chromium for the browser integration runner:
 npx --yes pnpm@10.28.0 --filter @wasl/web exec playwright install chromium
 npx --yes pnpm@10.28.0 --filter @wasl/web test:integration

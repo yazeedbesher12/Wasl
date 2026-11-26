@@ -4,6 +4,7 @@ export const FILE_PURPOSES = ['LESSON_RESOURCE', 'ASSESSMENT_ANSWER'] as const;
 export type FilePurpose = typeof FILE_PURPOSES[number];
 export interface FileUploadInput { purpose: FilePurpose; lessonId?: string; assessmentId?: string }
 export interface FileDto { id: string; schoolId: string; ownerId: string; purpose: FilePurpose; lessonId: string | null; assessmentId: string | null; storageKey: string; originalName: string; contentType: string; size: number; createdAt: string }
+export interface ParentFileContext { studentId: string; schoolId: string }
 export interface AnnouncementCreate { sectionSubjectId?: string | null; title: string; body: string }
 export interface AnnouncementUpdate { title?: string; body?: string }
 export interface AnnouncementDto { id: string; schoolId: string; authorId: string; sectionSubjectId: string | null; title: string; body: string; status: PublishStatus; publishedAt: string | null; createdAt: string }

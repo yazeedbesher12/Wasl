@@ -4,10 +4,12 @@ import type { FilePurpose, NotificationPayload, NotificationType } from '@wasl/s
 
 // Persistence entities mirror schema.prisma. Dates remain Date objects inside adapters.
 export interface School { id: string; name: string; nameAr: string | null; locale: Locale; active: boolean; createdAt: Date }
-export interface Person { id: string; email: string; fullName: string; passwordHash: string; preferredLanguage: Locale; active: boolean; createdAt: Date }
+export interface PersonProfile { id: string; email: string; fullName: string; preferredLanguage: Locale; active: boolean; createdAt: Date }
+export interface Person extends PersonProfile { passwordHash: string }
 export interface Membership { id: string; userId: string; schoolId: string | null; role: Role; active: boolean; createdAt: Date }
 export interface ParentLink { id: string; schoolId: string; parentId: string; studentId: string; status: LinkStatus; verifiedAt: Date | null; createdAt: Date }
-export interface RefreshRecord { id: string; userId: string; tokenHash: string; expiresAt: Date; revokedAt: Date | null; createdAt: Date }
+export interface SessionFamily { id: string; userId: string; revokedAt: Date | null }
+export interface RefreshRecord { id: string; userId: string; familyId: string; tokenHash: string; expiresAt: Date; revokedAt: Date | null; createdAt: Date }
 export interface AcademicYear { id: string; schoolId: string; name: string; startDate: Date; endDate: Date; archived: boolean }
 export interface Semester { id: string; schoolId: string; academicYearId: string; name: string; startDate: Date; endDate: Date }
 export interface Grade { id: string; schoolId: string; name: string; level: number }
@@ -23,6 +25,7 @@ export interface QuestionBank { id: string; schoolId: string; subjectId: string;
 export interface Question { id: string; schoolId: string; questionBankId: string; type: QuestionType; text: string; points: number }
 export interface QuestionOption { id: string; schoolId: string; questionId: string; text: string; isCorrect: boolean }
 export interface QuestionWithOptions extends Question { options: QuestionOption[] }
+export interface SafeQuestionWithOptions extends Question { options: Omit<QuestionOption, 'isCorrect'>[] }
 export interface AcademicMap { academicYears: AcademicYear; semesters: Semester; grades: Grade; sections: Section; subjects: Subject; sectionSubjects: SectionSubject; enrollments: Enrollment }
 export type AcademicKind = keyof AcademicMap;
 export interface Assessment { id: string; schoolId: string; sectionSubjectId: string; type: AssessmentType; title: string; instructions: string | null; opensAt: Date | null; dueAt: Date | null; status: AssessmentStatus; resultsReleasedAt: Date | null; createdAt: Date }

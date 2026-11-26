@@ -14,7 +14,7 @@ import { AuthUser } from './auth.types';
 
 const digest = (token: string) => createHash('sha256').update(token).digest('hex');
 const priority: Role[] = ['PLATFORM_ADMIN', 'SCHOOL_ADMIN', 'TEACHER', 'PARENT', 'STUDENT'];
-const identityScope = { kind: 'identity', userId: null, schoolId: null } as const;
+const identityScope = { kind: 'authentication', userId: null, schoolId: null } as const;
 const invalid = () => new UnauthorizedException('Invalid or unavailable session');
 
 @Injectable()
@@ -29,45 +29,58 @@ export class AuthService {
     if (Buffer.byteLength(password, 'utf8') > 72) throw new UnauthorizedException('Wrong email or password');
     const normalized = email.trim().toLowerCase();
     // Fetch a single identity internally. Password work stays outside the transaction lock.
-    const candidate = await this.storage.run(identityScope, r => r.identity.personByEmail(normalized));
+    const candidate = await this.storage.run(identityScope, r => r.authentication.credentialByEmail(normalized));
     const valid = await bcrypt.compare(password, candidate?.passwordHash ?? await this.dummyHash);
     if (!candidate?.active || !valid) throw new UnauthorizedException('Wrong email or password');
     return this.storage.run(identityScope, async r => {
-      const current = await r.identity.personById(candidate.id);
+      const current = await r.authentication.credentialById(candidate.id);
       if (!current?.active || current.passwordHash !== candidate.passwordHash) throw new UnauthorizedException('Wrong email or password');
       const memberships = await this.available(r, candidate.id);
       memberships.sort((a,b) => priority.indexOf(a.role) - priority.indexOf(b.role) || a.id.localeCompare(b.id));
       if (!memberships[0]) throw new UnauthorizedException('Wrong email or password');
-      const selected = memberships[0]; const tokens = await this.issue(r, current.id, current.email, selected);
+      const familyId = randomUUID();
+      await r.authentication.createFamily(familyId, current.id);
+      const selected = memberships[0]; const tokens = await this.issue(r, current.id, current.email, selected, familyId);
       return { ...tokens, user: await this.meInside(r, current.id, selected) };
     });
   }
   async refresh(token: string) {
     return this.storage.run(identityScope, async r => {
-      const saved = await r.identity.refreshByHash(digest(token));
+      const tokenHash = digest(token);
+      const saved = await r.authentication.refreshByHash(tokenHash);
       if (!saved || saved.revokedAt || saved.expiresAt <= new Date()) throw invalid();
       const selected = await activeMembership(r, saved.userId, this.refreshMembership(token));
       const user = await r.identity.personById(saved.userId); if (!user?.active) throw invalid();
-      if (!await r.identity.consumeRefresh(digest(token), new Date())) throw invalid();
-      return this.issue(r, user.id, user.email, selected);
+      if (!await r.authentication.claimFamily(saved.familyId, saved.userId)) throw invalid();
+      if (!await r.authentication.consumeRefresh(tokenHash, new Date())) throw invalid();
+      return this.issue(r, user.id, user.email, selected, saved.familyId);
     });
   }
-  async logout(token: string) { await this.storage.run(identityScope, r => r.identity.revokeRefresh(digest(token), new Date())); }
+  async logout(token: string) {
+    await this.storage.run(identityScope, async r => {
+      // A previously rotated token can still identify its own family for logout.
+      const saved = await r.authentication.refreshByHash(digest(token));
+      if (saved) await r.authentication.revokeFamily(saved.familyId, saved.userId, new Date());
+    });
+  }
   async switchSchool(actor: AuthUser, schoolId: string | null, role: Role) {
     return this.storage.run({ ...identityScope, userId: actor.sub }, async r => {
       await requireActor(r, actor);
       const selected = (await this.available(r, actor.sub)).find(m => m.schoolId === schoolId && m.role === role);
       if (!selected) throw new ForbiddenException('Requested membership is unavailable');
       const user = await r.identity.personById(actor.sub); if (!user) throw invalid();
-      return this.issue(r, user.id, user.email, selected);
+      if (!actor.sessionFamilyId || !await r.authentication.claimFamily(actor.sessionFamilyId, user.id)) throw invalid();
+      return this.issue(r, user.id, user.email, selected, actor.sessionFamilyId);
     });
   }
   async validateAccess(claims: AuthUser): Promise<AuthUser> {
-    if (!claims || !isUUID(claims.sub) || !isUUID(claims.membershipId) || !ROLES.includes(claims.role) || claims.schoolId !== null && !isUUID(claims.schoolId)) throw invalid();
+    if (!claims || !isUUID(claims.sub) || !isUUID(claims.membershipId) || !isUUID(claims.sessionFamilyId)
+      || !ROLES.includes(claims.role) || claims.schoolId !== null && !isUUID(claims.schoolId)) throw invalid();
     return this.storage.run({ ...identityScope, userId: claims.sub }, async r => {
       await requireActor(r, claims);
       const user = await r.identity.personById(claims.sub); if (!user) throw invalid();
-      return { sub: user.id, email: user.email, membershipId: claims.membershipId, schoolId: claims.schoolId, role: claims.role };
+      if (!await r.authentication.familyActive(claims.sessionFamilyId!, user.id)) throw invalid();
+      return { sub: user.id, email: user.email, membershipId: claims.membershipId, schoolId: claims.schoolId, role: claims.role, sessionFamilyId: claims.sessionFamilyId };
     });
   }
   async me(actor: AuthUser): Promise<MeDto> {
@@ -83,15 +96,15 @@ export class AuthService {
     const memberships = await Promise.all((await this.available(r, userId)).map(async m => ({ id: m.id, schoolId: m.schoolId, schoolName: m.schoolId ? (await r.schools.get(m.schoolId))?.name ?? null : null, role: m.role })));
     return { id: user.id, email: user.email, fullName: user.fullName, preferredLanguage: user.preferredLanguage, activeSchoolId: selected.schoolId, activeRole: selected.role, membershipId: selected.id, memberships };
   }
-  private async issue(r: Repositories, userId: string, email: string, membership: Membership) {
-    const claims: AuthUser = { sub: userId, email, schoolId: membership.schoolId, role: membership.role, membershipId: membership.id };
+  private async issue(r: Repositories, userId: string, email: string, membership: Membership, familyId: string) {
+    const claims: AuthUser = { sub: userId, email, schoolId: membership.schoolId, role: membership.role, membershipId: membership.id, sessionFamilyId: familyId };
     const accessToken = await this.jwt.signAsync(claims);
-    // Authenticated encryption keeps the entire token opaque while avoiding nonexistent schema columns.
+    // The opaque token carries the membership. Its hashed record binds the family.
     const nonce = randomBytes(12); const cipher = createCipheriv('aes-256-gcm', this.refreshKey, nonce);
     cipher.setAAD(Buffer.from('wasl-refresh-v1'));
     const encrypted = Buffer.concat([cipher.update(Buffer.concat([Buffer.from(membership.id, 'ascii'), randomBytes(32)])), cipher.final()]);
     const refreshToken = 'v1.' + Buffer.concat([nonce, cipher.getAuthTag(), encrypted]).toString('base64url');
-    await r.identity.createRefresh({ id: randomUUID(), userId, tokenHash: digest(refreshToken), expiresAt: new Date(Date.now() + this.config.getOrThrow<number>('JWT_REFRESH_TTL_DAYS') * 86400000), revokedAt: null, createdAt: new Date() });
+    await r.authentication.createRefresh({ id: randomUUID(), userId, familyId, tokenHash: digest(refreshToken), expiresAt: new Date(Date.now() + this.config.getOrThrow<number>('JWT_REFRESH_TTL_DAYS') * 86400000), revokedAt: null, createdAt: new Date() });
     return { accessToken, refreshToken };
   }
   private refreshMembership(token: string): string {

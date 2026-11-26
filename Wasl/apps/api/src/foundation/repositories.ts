@@ -1,21 +1,37 @@
 import type { Role } from '@wasl/shared';
 import type { Announcement, FileObject, Notification } from './entities';
 import type { Answer, Assessment, AssessmentQuestion, Submission, SubmissionWithAnswers } from './entities';
-import type { AcademicKind, AcademicMap, Lesson, Membership, ParentLink, Person, Question, QuestionBank, QuestionOption, QuestionWithOptions, RefreshRecord, Resource, School, Unit } from './entities';
+import type { AcademicKind, AcademicMap, Lesson, Membership, ParentLink, Person, PersonProfile, Question, QuestionBank, QuestionOption, QuestionWithOptions, RefreshRecord, Resource, School, Unit } from './entities';
 
 export const STORAGE = Symbol('WASL_PHASE1_STORAGE');
 /** These scopes are server-created only; never accepted from an HTTP request body. */
-export interface StorageScope { kind: 'identity' | 'platform' | 'school' | 'parent-list'; userId: string | null; schoolId: string | null }
+export type SubjectAccess = { operation: 'read'; childId?: string } | { operation: 'insert' | 'update'; subjectId: string };
+export interface StorageScope {
+  kind: 'authentication' | 'identity' | 'platform' | 'school-administration' | 'academic-administration' | 'assessment-staff' | 'school' | 'parent-list';
+  userId: string | null;
+  schoolId: string | null;
+  subjects?: { membershipId: string; access: SubjectAccess };
+  assessment?: { membershipId: string; operation: 'draft' | 'submit' | 'results' | 'read' | 'metadata' | 'discover' | 'staff-read' | 'staff-write' | 'staff-grade' | 'staff-release' | 'academic-write' | 'content-write' | 'file-write' | 'announcement-write'; targetId: string };
+}
 export interface IdentityRepository {
-  personById(id: string): Promise<Person | null>;
-  personByEmail(email: string): Promise<Person | null>;
+  directoryPersonById(id: string): Promise<Pick<PersonProfile, 'id' | 'fullName' | 'active'> | null>;
+  personById(id: string): Promise<PersonProfile | null>;
+  personByEmail(email: string): Promise<PersonProfile | null>;
   membershipsFor(userId: string): Promise<Membership[]>;
-  createPerson(row: Person): Promise<Person>;
-  updateProfile(id: string, patch: Pick<Person, 'fullName' | 'preferredLanguage'>): Promise<Person>;
-  refreshByHash(hash: string): Promise<RefreshRecord | null>;
+  createPerson(row: Person): Promise<PersonProfile>;
+  updateProfile(id: string, patch: Pick<PersonProfile, 'fullName' | 'preferredLanguage'>): Promise<PersonProfile>;
+}
+export type LoginCredential = Pick<Person, 'id' | 'email' | 'active' | 'passwordHash'>;
+export interface AuthenticationRepository {
+  credentialById(id: string): Promise<LoginCredential | null>;
+  credentialByEmail(email: string): Promise<LoginCredential | null>;
+  createFamily(id: string, userId: string): Promise<void>;
+  familyActive(id: string, userId: string): Promise<boolean>;
+  claimFamily(id: string, userId: string): Promise<boolean>;
+  revokeFamily(id: string, userId: string, now: Date): Promise<void>;
+  refreshByHash(hash: string): Promise<Pick<RefreshRecord, 'userId' | 'familyId' | 'expiresAt' | 'revokedAt'> | null>;
   createRefresh(row: RefreshRecord): Promise<void>;
   consumeRefresh(hash: string, now: Date): Promise<boolean>;
-  revokeRefresh(hash: string, now: Date): Promise<void>;
 }
 export interface SchoolRepository {
   list(): Promise<School[]>;
@@ -64,11 +80,14 @@ export interface QuestionRepository {
   updateBank(row: QuestionBank): Promise<QuestionBank>;
   listQuestions(): Promise<QuestionWithOptions[]>;
   getQuestion(id: string): Promise<QuestionWithOptions | null>;
+  listSafeQuestions(): Promise<import('./entities').SafeQuestionWithOptions[]>;
+  getSafeQuestion(id: string): Promise<import('./entities').SafeQuestionWithOptions | null>;
   createQuestion(row: Question, options: QuestionOption[]): Promise<QuestionWithOptions>;
   updateQuestion(row: Question, options: QuestionOption[]): Promise<QuestionWithOptions>;
   isQuestionLocked(id: string): Promise<boolean>;
 }
 export interface AssessmentRepository {
+  questionStats(id: string): Promise<{ questionCount: number; totalPoints: number }>;
   list(): Promise<Assessment[]>;
   get(id: string): Promise<Assessment | null>;
   create(row: Assessment): Promise<Assessment>;
@@ -90,7 +109,7 @@ export interface CommunicationRepository {
   notify(rows: Notification[]): Promise<void>;
   markRead(id: string, userId: string, at: Date): Promise<Notification>;
 }
-export interface Repositories { identity: IdentityRepository; schools: SchoolRepository; people: PeopleRepository; academics: AcademicRepository; content: ContentRepository; questions: QuestionRepository; links: LinkRepository; assessments: AssessmentRepository; files: FileRepository; communication: CommunicationRepository }
+export interface Repositories { readonly authentication: AuthenticationRepository; identity: IdentityRepository; schools: SchoolRepository; people: PeopleRepository; academics: AcademicRepository; content: ContentRepository; questions: QuestionRepository; links: LinkRepository; assessments: AssessmentRepository; files: FileRepository; communication: CommunicationRepository }
 /** A single atomic boundary for a complete service operation, including its scope checks. */
 export interface FoundationStorage {
   readonly driver: 'memory' | 'prisma';

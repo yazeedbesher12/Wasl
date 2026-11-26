@@ -4,10 +4,10 @@ import { randomUUID } from 'node:crypto';
 import type { AcademicDtoMap, AcademicOverviewDto, ChildDto, ClassDto, Page, Role, RosterEntryDto } from '@wasl/shared';
 import type { AuthUser } from '../auth/auth.types';
 import { requireActor } from './authorization';
-import type { AcademicKind, AcademicMap, AcademicYear, Enrollment, ParentLink, Person, Section, SectionSubject, Semester } from './entities';
+import type { AcademicKind, AcademicMap, AcademicYear, Enrollment, ParentLink, PersonProfile, Section, SectionSubject, Semester } from './entities';
 import { academicDto, linkDto, memberDto, schoolDto, userDto } from './mapping';
 import { STORAGE } from './repositories';
-import type { FoundationStorage, Repositories } from './repositories';
+import type { FoundationStorage, Repositories, SubjectAccess } from './repositories';
 import type { AcademicListDto, CreateLinkDto, CreateMembershipDto, CreateSchoolDto, CreateUserDto, LinkListDto, ListDto, PeopleListDto, ProfileDto, SchoolAdministratorDto, SchoolListDto, UpdateSchoolDto } from './dto';
 
 const notFound = () => new NotFoundException('Record not found');
@@ -27,9 +27,14 @@ export function pageOf<T extends { id: string }>(rows: T[], query: ListDto, name
 @Injectable()
 export class FoundationService {
   constructor(@Inject(STORAGE) private storage: FoundationStorage) {}
-  private school<T>(actor: AuthUser, roles: readonly Role[], work: (r: Repositories) => Promise<T>) {
+  private school<T>(actor: AuthUser, roles: readonly Role[], work: (r: Repositories) => Promise<T>, kind: 'school' | 'school-administration' | 'academic-administration' = 'school', access?: SubjectAccess, linkMetadata = false) {
     if (!actor.schoolId) throw new ForbiddenException('An active school role is required');
-    return this.storage.run({ kind: 'school', userId: actor.sub, schoolId: actor.schoolId }, async r => { await requireActor(r, actor, roles); return work(r); });
+    const subjects = access && { membershipId: actor.membershipId, access };
+    return this.storage.run({ kind, userId: actor.sub, schoolId: actor.schoolId, subjects,
+      assessment: kind === 'school-administration' ? undefined : {
+        membershipId: actor.membershipId, operation: kind === 'academic-administration' ? 'academic-write' : linkMetadata ? 'metadata' : 'read', targetId: actor.sub,
+      } },
+    async r => { await requireActor(r, actor, roles); return work(r); });
   }
   private platform<T>(actor: AuthUser, work: (r: Repositories) => Promise<T>, targetSchoolId: string | null = null) {
     if (actor.role !== 'PLATFORM_ADMIN') throw new ForbiddenException();
@@ -79,7 +84,7 @@ export class FoundationService {
   listUsers(actor: AuthUser, q: PeopleListDto) {
     return this.school(actor, ['SCHOOL_ADMIN'], async r => {
       const members = (await r.people.memberships()).filter(m => (!q.role || m.role === q.role) && (!q.active || m.active === (q.active === 'true')));
-      const users: Person[] = [];
+      const users: PersonProfile[] = [];
       for (const id of new Set(members.map(m => m.userId))) { const u = await r.identity.personById(id); if (u) users.push(u); }
       const page = pageOf(users, q, u => u.fullName + ' ' + u.email); return { ...page, items: page.items.map(userDto) };
     });
@@ -95,14 +100,14 @@ export class FoundationService {
       const user = await r.identity.createPerson({ id: randomUUID(), email, fullName: input.fullName, passwordHash, preferredLanguage: input.preferredLanguage ?? 'ar', active: true, createdAt: new Date() });
       const membership = await r.people.createMembership({ id: randomUUID(), schoolId: actor.schoolId!, userId: user.id, role: input.role, active: true, createdAt: new Date() });
       return { user: userDto(user), membership: memberDto(membership) };
-    });
+    }, 'school-administration');
   }
   addMembership(actor: AuthUser, input: CreateMembershipDto) {
     return this.school(actor, ['SCHOOL_ADMIN'], async r => {
       const user = await r.identity.personByEmail(input.email.trim().toLowerCase()); if (!user?.active) throw notFound();
       const row = await r.people.createMembership({ id: randomUUID(), userId: user.id, schoolId: actor.schoolId!, role: input.role, active: true, createdAt: new Date() });
       return memberDto(row);
-    });
+    }, 'school-administration');
   }
   listMemberships(actor: AuthUser, q: PeopleListDto) {
     return this.school(actor, ['SCHOOL_ADMIN'], async r => {
@@ -115,7 +120,7 @@ export class FoundationService {
     const found = (await r.people.memberships()).find(m => m.id === id); if (!found) throw notFound();
     if (active === true && !(await r.identity.personById(found.userId))?.active) throw new ConflictException('The global user is inactive');
     return memberDto(active === undefined ? found : await r.people.setMembershipActive(id, active));
-  }); }
+  }, active === undefined ? 'school' : 'school-administration'); }
   updateProfile(actor: AuthUser, input: ProfileDto) {
     return this.storage.run({ kind: 'identity', schoolId: null, userId: actor.sub }, async r => {
       await requireActor(r, actor); const u = await r.identity.personById(actor.sub); if (!u) throw notFound();
@@ -151,13 +156,16 @@ export class FoundationService {
         (!q.status || 'status' in row && row.status === q.status));
       const page = pageOf(rows, q, row => 'name' in row ? row.name : 'nameEn' in row ? row.nameEn + ' ' + row.nameAr : row.id);
       return { ...page, items: page.items.map(row => academicDto(kind, row)) };
-    });
+    }, 'school', { operation: 'read' });
   }
-  getAcademic<K extends AcademicKind>(actor: AuthUser, kind: K, id: string) { return this.school(actor, ['SCHOOL_ADMIN', 'TEACHER', 'STUDENT'], async r => { const row = (await this.visibleAcademic(r, actor, kind)).find(v => v.id === id); if (!row) throw notFound(); return academicDto(kind, row); }); }
+  getAcademic<K extends AcademicKind>(actor: AuthUser, kind: K, id: string) { return this.school(actor, ['SCHOOL_ADMIN', 'TEACHER', 'STUDENT'], async r => { const row = (await this.visibleAcademic(r, actor, kind)).find(v => v.id === id); if (!row) throw notFound(); return academicDto(kind, row); }, 'school', { operation: 'read' }); }
   saveAcademic<K extends AcademicKind>(actor: AuthUser, kind: K, input: AcademicWrite, id?: string): Promise<AcademicDtoMap[K]> {
+    const recordId = id ?? randomUUID();
+    const subjectAccess: SubjectAccess | undefined = kind === 'subjects' ? { operation: id ? 'update' : 'insert', subjectId: recordId }
+      : kind === 'sectionSubjects' ? { operation: 'read' } : undefined;
     return this.school(actor, ['SCHOOL_ADMIN'], async r => {
       const old = id ? await r.academics.get(kind, id) : null; if (id && !old) throw notFound();
-      const base = { id: old?.id ?? randomUUID(), schoolId: actor.schoolId! };
+      const base = { id: recordId, schoolId: actor.schoolId! };
       const builders = {
         academicYears: () => { const o = old as AcademicYear | null; return { ...base, name: requireValue(input.name ?? o?.name), startDate: input.startDate !== undefined ? dateOnly(input.startDate) : requireValue(o?.startDate), endDate: input.endDate !== undefined ? dateOnly(input.endDate) : requireValue(o?.endDate), archived: input.archived ?? o?.archived ?? false }; },
         semesters: () => { const o = old as Semester | null; const academicYearId = requireValue(input.academicYearId ?? o?.academicYearId); immutable(o?.academicYearId, academicYearId); return { ...base, academicYearId, name: requireValue(input.name ?? o?.name), startDate: input.startDate !== undefined ? dateOnly(input.startDate) : requireValue(o?.startDate), endDate: input.endDate !== undefined ? dateOnly(input.endDate) : requireValue(o?.endDate) }; },
@@ -169,7 +177,7 @@ export class FoundationService {
       };
       const row = builders[kind]() as AcademicMap[K]; await this.validateAcademic(r, kind, row, !old);
       return academicDto(kind, old ? await r.academics.update(kind, row) : await r.academics.create(kind, row));
-    });
+    }, kind === 'subjects' ? 'school' : 'academic-administration', subjectAccess);
   }
   private async validateAcademic<K extends AcademicKind>(r: Repositories, kind: K, row: AcademicMap[K], create: boolean) {
     const year = async (id: string, open = false) => { const y = await r.academics.get('academicYears', id); if (!y) throw notFound(); if (open && y.archived) throw new ConflictException('Academic year is archived'); return y; };
@@ -188,57 +196,61 @@ export class FoundationService {
       else {
         const e = v as Enrollment;
         if (e.status === 'ACTIVE') { if (!await r.people.eligible(e.studentId, 'STUDENT')) throw notFound(); }
-        else if (!(await r.people.memberships()).some(m => m.userId === e.studentId && m.role === 'STUDENT') || !await r.identity.personById(e.studentId)) throw notFound();
+        else if (!(await r.people.memberships()).some(m => m.userId === e.studentId && m.role === 'STUDENT') || !await r.identity.directoryPersonById(e.studentId)) throw notFound();
       }
     }
   }
   private async classDto(r: Repositories, assignment: SectionSubject): Promise<ClassDto> {
     const section = await r.academics.get('sections', assignment.sectionId); const subject = await r.academics.get('subjects', assignment.subjectId); if (!section || !subject) throw notFound();
     const grade = await r.academics.get('grades', section.gradeId); const year = await r.academics.get('academicYears', section.academicYearId); if (!grade || !year) throw notFound();
-    const teacher = assignment.teacherId && await r.people.eligible(assignment.teacherId, 'TEACHER') ? await r.identity.personById(assignment.teacherId) : null;
+    const teacher = assignment.teacherId && await r.people.eligible(assignment.teacherId, 'TEACHER') ? await r.identity.directoryPersonById(assignment.teacherId) : null;
     return { assignment: academicDto('sectionSubjects', assignment), section: academicDto('sections', section), subject: academicDto('subjects', subject), grade: academicDto('grades', grade), academicYear: academicDto('academicYears', year), teacher: teacher ? { id: teacher.id, fullName: teacher.fullName } : null };
   }
   classes(actor: AuthUser, q: ListDto) { return this.school(actor, ['TEACHER', 'STUDENT'], async r => {
     const rows = await Promise.all((await this.visibleAcademic(r, actor, 'sectionSubjects')).map(a => this.classDto(r, a)));
     const page = pageOf(rows.map(c => ({ ...c, id: c.assignment.id })), q, c => c.subject.nameEn + ' ' + c.subject.nameAr + ' ' + c.section.name);
     return { ...page, items: page.items.map(({ id: _id, ...c }) => c) };
-  }); }
+  }, 'school', { operation: 'read' }); }
   roster(actor: AuthUser, assignmentId: string, q: ListDto) { return this.school(actor, ['SCHOOL_ADMIN', 'TEACHER'], async r => {
     const assignment = (await this.visibleAcademic(r, actor, 'sectionSubjects')).find(a => a.id === assignmentId); if (!assignment) throw notFound();
     const entries: (RosterEntryDto & { id: string })[] = [];
     for (const e of await this.visibleAcademic(r, actor, 'enrollments')) if (e.sectionId === assignment.sectionId && e.status === 'ACTIVE' && await r.people.eligible(e.studentId, 'STUDENT')) {
-      const student = await r.identity.personById(e.studentId); if (student) entries.push({ id: e.id, enrollment: academicDto('enrollments', e), student: { id: student.id, fullName: student.fullName } });
+      const student = await r.identity.directoryPersonById(e.studentId); if (student) entries.push({ id: e.id, enrollment: academicDto('enrollments', e), student: { id: student.id, fullName: student.fullName } });
     }
     const page = pageOf(entries, q, e => e.student.fullName); return { ...page, items: page.items.map(({ id: _id, ...row }) => row) };
-  }); }
-  overview(actor: AuthUser) { return this.school(actor, ['SCHOOL_ADMIN'], r => this.overviewInside(r, actor)); }
-  private async overviewInside(r: Repositories, actor: Pick<AuthUser, 'role' | 'sub' | 'schoolId'>, student?: Person): Promise<AcademicOverviewDto> {
+  }, 'school', { operation: 'read' }); }
+  overview(actor: AuthUser) { return this.school(actor, ['SCHOOL_ADMIN'], r => this.overviewInside(r, actor), 'school', { operation: 'read' }); }
+  private async overviewInside(r: Repositories, actor: Pick<AuthUser, 'role' | 'sub' | 'schoolId'>, student?: Pick<PersonProfile, 'id' | 'fullName'>): Promise<AcademicOverviewDto> {
     const school = await r.schools.get(actor.schoolId!); if (!school) throw notFound();
     const rows = await this.visibleAcademic(r, actor, 'sectionSubjects'); const enrollments = await this.visibleAcademic(r, actor, 'enrollments');
     return { school: schoolDto(school), student: student ? { id: student.id, fullName: student.fullName } : null, classes: await Promise.all(rows.map(a => this.classDto(r, a))), enrollments: enrollments.map(e => academicDto('enrollments', e)), counts: { academicYears: (await this.visibleAcademic(r, actor, 'academicYears')).length, sections: (await this.visibleAcademic(r, actor, 'sections')).length, subjects: (await this.visibleAcademic(r, actor, 'subjects')).length, assignments: rows.length, activeEnrollments: enrollments.filter(e => e.status === 'ACTIVE').length } };
   }
-  links(actor: AuthUser, q: LinkListDto) { return this.school(actor, ['SCHOOL_ADMIN'], async r => { const page = pageOf((await r.links.list()).filter(l => !q.status || l.status === q.status), q, l => l.parentId + ' ' + l.studentId); return { ...page, items: page.items.map(linkDto) }; }); }
-  getLink(actor: AuthUser, id: string) { return this.school(actor, ['SCHOOL_ADMIN'], async r => { const link = await r.links.get(id); if (!link) throw notFound(); return linkDto(link); }); }
+  links(actor: AuthUser, q: LinkListDto) { return this.school(actor, ['SCHOOL_ADMIN'], async r => { const page = pageOf((await r.links.list()).filter(l => !q.status || l.status === q.status), q, l => l.parentId + ' ' + l.studentId); return { ...page, items: page.items.map(linkDto) }; }, 'school', undefined, true); }
+  getLink(actor: AuthUser, id: string) { return this.school(actor, ['SCHOOL_ADMIN'], async r => { const link = await r.links.get(id); if (!link) throw notFound(); return linkDto(link); }, 'school', undefined, true); }
   createLink(actor: AuthUser, input: CreateLinkDto) { return this.school(actor, ['SCHOOL_ADMIN'], async r => {
     if (input.parentId === input.studentId || !await r.people.eligible(input.parentId, 'PARENT') || !await r.people.eligible(input.studentId, 'STUDENT')) throw notFound();
     return linkDto(await r.links.create({ id: randomUUID(), schoolId: actor.schoolId!, parentId: input.parentId, studentId: input.studentId, status: 'PENDING', verifiedAt: null, createdAt: new Date() }));
-  }); }
+  }, 'academic-administration'); }
   linkStatus(actor: AuthUser, id: string, status: ParentLink['status']) { return this.school(actor, ['SCHOOL_ADMIN'], async r => {
     const link = await r.links.get(id); if (!link) throw notFound();
     if (status === 'VERIFIED' && (!await r.people.eligible(link.parentId, 'PARENT') || !await r.people.eligible(link.studentId, 'STUDENT'))) throw notFound();
     return linkDto(await r.links.update({ ...link, status, verifiedAt: status === 'VERIFIED' ? link.status === 'VERIFIED' ? link.verifiedAt ?? new Date() : new Date() : null }));
-  }); }
+  }, 'academic-administration'); }
   private async parentLinks(actor: AuthUser) {
     if (actor.role !== 'PARENT') throw new ForbiddenException();
     // Exact own-parent identity lookup without tenant bypass. No arbitrary child lookup here.
-    return this.storage.run({ kind: 'parent-list', userId: actor.sub, schoolId: null }, async r => { await requireActor(r, actor, ['PARENT']); return r.links.forParent(actor.sub); });
+    return this.storage.run({ kind: 'parent-list', userId: actor.sub, schoolId: actor.schoolId,
+      assessment: { membershipId: actor.membershipId, operation: 'discover', targetId: actor.sub } },
+    async r => { await requireActor(r, actor, ['PARENT']); return r.links.forParent(actor.sub); });
   }
-  private parentChild<T>(actor: AuthUser, link: ParentLink, work: (r: Repositories, student: Person) => Promise<T>) {
-    return this.storage.run({ kind: 'school', userId: actor.sub, schoolId: link.schoolId }, async r => {
+  private parentChild<T>(actor: AuthUser, link: ParentLink, work: (r: Repositories, student: Pick<PersonProfile, 'id' | 'fullName'>) => Promise<T>) {
+    return this.storage.run({ kind: 'school', userId: actor.sub, schoolId: link.schoolId,
+      subjects: { membershipId: actor.membershipId, access: { operation: 'read', childId: link.studentId } },
+      assessment: { membershipId: actor.membershipId, operation: 'read', targetId: link.studentId } }, async r => {
       await requireActor(r, actor, ['PARENT']);
       const current = (await r.links.forParent(actor.sub)).find(l => l.id === link.id && l.studentId === link.studentId && l.status === 'VERIFIED');
       if (!current || !(await r.schools.get(link.schoolId))?.active || !await r.people.eligible(actor.sub, 'PARENT') || !await r.people.eligible(link.studentId, 'STUDENT')) throw notFound();
-      const student = await r.identity.personById(link.studentId); if (!student?.active) throw notFound(); return work(r, student);
+      const student = await r.identity.directoryPersonById(link.studentId); if (!student?.active) throw notFound(); return work(r, student);
     });
   }
   async children(actor: AuthUser, q: ListDto): Promise<Page<ChildDto>> {
