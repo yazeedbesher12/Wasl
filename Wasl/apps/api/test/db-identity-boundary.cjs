@@ -75,6 +75,7 @@ test('actual PostgreSQL execution credentials enforce the identity boundary', as
     const operations = [
       tx => tx.$queryRaw`SELECT password_hash FROM public.users LIMIT 0`,
       tx => tx.$queryRaw`SELECT token_hash FROM public.refresh_tokens LIMIT 0`,
+      tx => tx.$queryRaw`SELECT id FROM public.session_families LIMIT 0`,
       tx => tx.$executeRaw`UPDATE public.refresh_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE false`,
       tx => tx.$executeRaw`UPDATE public.users SET full_name = 'Forged' WHERE false`,
       tx => tx.$executeRaw`UPDATE public.memberships SET active = false WHERE false`,
@@ -101,6 +102,12 @@ test('actual PostgreSQL execution credentials enforce the identity boundary', as
     await rejectSql(auth, tx => tx.$executeRaw`UPDATE public.memberships SET active = false WHERE false`);
     await rejectSql(platform, tx => tx.$queryRaw`SELECT password_hash FROM public.users LIMIT 0`);
     await rejectSql(platform, tx => tx.$queryRaw`SELECT token_hash FROM public.refresh_tokens LIMIT 0`);
+    for (const restricted of [platform, pools.academicAdmin, pools.assessmentStaff]) {
+      await rejectSql(restricted, tx => tx.$queryRaw`SELECT id FROM public.session_families LIMIT 0`);
+      await rejectSql(restricted, tx => tx.$executeRaw`UPDATE public.session_families SET revoked_at = CURRENT_TIMESTAMP WHERE false`);
+    }
+    await rejectSql(auth, tx => tx.$executeRaw`UPDATE public.session_families SET user_id = user_id WHERE false`);
+    await rejectSql(auth, tx => tx.$executeRaw`UPDATE public.refresh_tokens SET family_id = family_id WHERE false`);
     await rejectSql(platform, tx => tx.$queryRaw`SELECT id FROM public.academic_years LIMIT 0`);
     await rejectSql(platform, tx => tx.$executeRaw`UPDATE public.memberships SET active = false WHERE false`);
     await rejectSql(platform, tx => tx.$executeRaw`UPDATE wasl_admin.school_memberships SET role = 'PLATFORM_ADMIN' WHERE false`);
@@ -137,17 +144,92 @@ test('actual PostgreSQL execution credentials enforce the identity boundary', as
     const password = randomUUID();
     const email = `switch-${randomUUID()}@wasl.test`;
     const first = await foundation.provisionAdministrator(platformActor, school.id, { email, fullName: 'Fictional Switch Admin', password });
-    const second = await foundation.provisionAdministrator(platformActor, anotherSchool.id, { email });
-    assert.equal(first.user.id, second.user.id);
-    const actor = { sub: first.user.id, email, schoolId: school.id, role: 'SCHOOL_ADMIN', membershipId: first.membership.id };
     const jwt = new JwtService({ secret: process.env.JWT_ACCESS_SECRET });
     const config = new ConfigService({ JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET, JWT_REFRESH_TTL_DAYS: 30 });
     const sessions = new AuthService(storage, jwt, config);
+    const initial = await sessions.login(email, password);
+    const actor = await sessions.validateAccess(await jwt.verifyAsync(initial.accessToken));
+    assert.equal(actor.schoolId, school.id);
+    const second = await foundation.provisionAdministrator(platformActor, anotherSchool.id, { email });
+    assert.equal(first.user.id, second.user.id);
     const switched = await sessions.switchSchool(actor, anotherSchool.id, 'SCHOOL_ADMIN');
     const claims = await jwt.verifyAsync(switched.accessToken);
     assert.equal(claims.schoolId, anotherSchool.id);
     assert.equal(claims.membershipId, second.membership.id);
     assert.equal((await sessions.validateAccess(claims)).schoolId, anotherSchool.id);
     await assert.rejects(sessions.switchSchool(actor, null, 'PLATFORM_ADMIN'), error => error.getStatus?.() === 403);
+    const independent = await sessions.login(email, password);
+    const rotated = await sessions.refresh(switched.refreshToken);
+    const invalid = error => error.getStatus?.() === 401;
+    await assert.rejects(sessions.refresh(switched.refreshToken), invalid);
+    // An already consumed token can still identify its own family for logout.
+    await sessions.logout(switched.refreshToken);
+    await sessions.logout(rotated.refreshToken);
+    await sessions.logout('fictional-unknown-token');
+    for (const session of [initial, switched, rotated]) {
+      await assert.rejects(sessions.refresh(session.refreshToken), invalid);
+      const accessClaims = await jwt.verifyAsync(session.accessToken);
+      await assert.rejects(sessions.validateAccess(accessClaims), invalid);
+    }
+    await assert.rejects(sessions.switchSchool(actor, anotherSchool.id, 'SCHOOL_ADMIN'), invalid);
+    assert.equal(!!(await sessions.refresh(independent.refreshToken)).refreshToken, true);
+
+    const schoolSession = await sessions.login(email, password);
+    const schoolActor = await sessions.validateAccess(await jwt.verifyAsync(schoolSession.accessToken));
+    const secondContext = await sessions.switchSchool(schoolActor, anotherSchool.id, 'SCHOOL_ADMIN');
+    const secondActor = await sessions.validateAccess(await jwt.verifyAsync(secondContext.accessToken));
+    await foundation.membership(secondActor, second.membership.id, false);
+    await assert.rejects(sessions.refresh(secondContext.refreshToken), invalid);
+
+    const expired = new AuthService(storage, jwt, new ConfigService({
+      JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET, JWT_REFRESH_TTL_DAYS: 0,
+    }));
+    const short = await expired.login(email, password);
+    await assert.rejects(sessions.refresh(short.refreshToken), invalid);
+    await assert.rejects(sessions.refresh('fictional-invalid-token'), invalid);
+  });
+
+  await t.test('concurrent refresh and logout serialize on the family through restricted Prisma transactions', async () => {
+    const password = randomUUID();
+    const email = `race-${randomUUID()}@wasl.test`;
+    await foundation.provisionAdministrator(platformActor, school.id, { email, fullName: 'Fictional Race Admin', password });
+    const jwt = new JwtService({ secret: process.env.JWT_ACCESS_SECRET });
+    const config = new ConfigService({ JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET, JWT_REFRESH_TTL_DAYS: 30 });
+    const sessions = new AuthService(storage, jwt, config);
+    const initial = await sessions.login(email, password);
+    let reachedClaim, releaseClaim, reachedLogout;
+    const claimed = new Promise(resolve => { reachedClaim = resolve; });
+    const release = new Promise(resolve => { releaseClaim = resolve; });
+    const logoutStarted = new Promise(resolve => { reachedLogout = resolve; });
+    function wrap(method, before) {
+      return { run: (scope, action) => storage.run(scope, r => {
+        const authentication = r.authentication;
+        const original = authentication[method];
+        authentication[method] = (...args) => before(original, args);
+        return action({ ...r, authentication });
+      }) };
+    }
+    const issuing = new AuthService(wrap('consumeRefresh', async (consume, args) => {
+      reachedClaim();
+      await release;
+      return consume(...args);
+    }), jwt, config);
+    const revoking = new AuthService(wrap('revokeFamily', (revoke, args) => {
+      const result = revoke(...args);
+      reachedLogout();
+      return result;
+    }), jwt, config);
+    const rotation = issuing.refresh(initial.refreshToken);
+    await Promise.race([claimed, rotation.then(() => assert.fail('Refresh did not reach the gate'))]);
+    const logout = revoking.logout(initial.refreshToken);
+    try {
+      await Promise.race([logoutStarted, logout.then(() => assert.fail('Logout did not reach the gate'))]);
+    } finally {
+      releaseClaim();
+    }
+    const [descendant] = await Promise.all([rotation, logout]);
+    const invalid = error => error.getStatus?.() === 401;
+    await assert.rejects(sessions.refresh(descendant.refreshToken), invalid);
+    await assert.rejects(sessions.refresh(initial.refreshToken), invalid);
   });
 });

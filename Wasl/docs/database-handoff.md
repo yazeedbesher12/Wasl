@@ -300,6 +300,16 @@ Before applying this migration to an existing database, review historic grades
 and retain a tested backup. The migration preserves existing rows. An older
 inconsistent grade must be corrected before a new release can succeed.
 
+Migration `202611260011_session_families` adds an auth-only family for each
+login. Refresh and school switching issue credentials within that family.
+Logout revokes the family, including its access tokens and all refresh
+credentials. A consumed token can identify its own family for logout.
+Separate logins have separate families. Before applying the migration,
+schedule a coordinated API cutover and tell users to sign in again. The
+migration preserves legacy token records and revokes them because their
+session lineage cannot be reconstructed. Older API instances must be stopped
+before the schema cutover.
+
 School administrators can infer that an email belongs to a global account
 through the existing user-creation and membership-linking flows. Changing that
 behavior requires a product decision on whether administrators should be able

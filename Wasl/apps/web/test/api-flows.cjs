@@ -398,6 +398,31 @@ async function main() {
   console.log(
     'PASS retry without fixture fallback, preservation of demo data, logout and session clearing',
   );
+  await activate(parent);
+  const parentRequest = parent.context.request;
+  const beforeSwitch = await parentRequest.get(base + '/api/wasl/me');
+  assert.equal(beforeSwitch.status(), 200);
+  const { activeSchoolId } = await beforeSwitch.json();
+  const original = (await parent.context.cookies()).find(cookie => cookie.name === 'wasl.refresh');
+  assert.ok(original);
+  const targetSchool = activeSchoolId === id(1) ? id(2) : id(1);
+  const switched = await parentRequest.post(base + '/api/wasl/auth/switch-school', {
+    headers: { Origin: base }, data: { schoolId: targetSchool, role: 'PARENT' },
+  });
+  assert.equal(switched.status(), 200);
+  assert.deepEqual(await switched.json(), { ok: true });
+  const afterSwitch = await parentRequest.get(base + '/api/wasl/me');
+  assert.equal(afterSwitch.status(), 200);
+  assert.equal((await afterSwitch.json()).activeSchoolId, targetSchool);
+  const signedOut = await parentRequest.post(base + '/api/wasl/auth/logout', { headers: { Origin: base } });
+  assert.equal(signedOut.status(), 200);
+  assert(!(await parent.context.cookies()).some(cookie => cookie.name.startsWith('wasl.')));
+  const oldSession = await fetch(upstream + '/auth/refresh', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken: original.value }),
+  });
+  assert.equal(oldSession.status, 401);
+  console.log('PASS web school switch and logout revoke the original server session');
   const out = process.env.WASL_TEST_ARTIFACTS;
   if (out) {
     await activate(student);

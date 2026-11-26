@@ -143,6 +143,22 @@ describe('mobile session ownership', () => {
     expect(h.saved()).toEqual(B);
   });
 
+  it('discards a refresh completed after a school switch without revoking the shared family', async () => {
+    const h = harness();
+    await h.api.restore();
+    const old = expect(h.api.call('old')).rejects.toMatchObject(changed);
+    (await h.take('old')).respond(401);
+    const refresh = await h.take('auth/refresh');
+    const switching = h.api.switchContext('fictional-school', 'TEACHER');
+    (await h.take('auth/switch-school')).respond(200, B);
+    (await h.take('me')).respond(200, { activeSchoolId: 'fictional-school' });
+    await switching;
+    refresh.respond(200, rotated);
+    await old;
+    expect(h.saved()).toEqual(B);
+    expect(h.sent.filter(r => r.path === 'auth/logout')).toHaveLength(0);
+  });
+
   it('rejects a switch response that arrives after a different login', async () => {
     const h = harness();
     await h.api.restore();

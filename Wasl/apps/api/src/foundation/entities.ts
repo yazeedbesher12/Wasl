@@ -8,7 +8,8 @@ export interface PersonProfile { id: string; email: string; fullName: string; pr
 export interface Person extends PersonProfile { passwordHash: string }
 export interface Membership { id: string; userId: string; schoolId: string | null; role: Role; active: boolean; createdAt: Date }
 export interface ParentLink { id: string; schoolId: string; parentId: string; studentId: string; status: LinkStatus; verifiedAt: Date | null; createdAt: Date }
-export interface RefreshRecord { id: string; userId: string; tokenHash: string; expiresAt: Date; revokedAt: Date | null; createdAt: Date }
+export interface SessionFamily { id: string; userId: string; revokedAt: Date | null }
+export interface RefreshRecord { id: string; userId: string; familyId: string; tokenHash: string; expiresAt: Date; revokedAt: Date | null; createdAt: Date }
 export interface AcademicYear { id: string; schoolId: string; name: string; startDate: Date; endDate: Date; archived: boolean }
 export interface Semester { id: string; schoolId: string; academicYearId: string; name: string; startDate: Date; endDate: Date }
 export interface Grade { id: string; schoolId: string; name: string; level: number }

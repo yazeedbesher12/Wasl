@@ -13,6 +13,7 @@ export class NativeApi {
   private rotation?: { epoch: number; pair: TokenPair; pending: Promise<void> };
   private writes: Promise<void> = Promise.resolve();
   private generation = 0;
+  private familyGeneration = 0;
   private switchIntent = 0;
   get epoch() { return this.generation; }
   constructor(
@@ -90,6 +91,7 @@ export class NativeApi {
   }
   private async rotate(epoch: number, original: TokenPair) {
     this.assertCurrent(epoch);
+    const family = this.familyGeneration;
     const r = await this.fetch('auth/refresh', {
       method: 'POST',
       body: JSON.stringify({ refreshToken: original.refreshToken }),
@@ -101,7 +103,8 @@ export class NativeApi {
     }
     const pair = (await r.json()) as TokenPair;
     if (epoch !== this.epoch) {
-      void this.revoke(pair.refreshToken);
+      // A school switch supersedes the response but keeps its server family.
+      if (family !== this.familyGeneration) void this.revoke(pair.refreshToken);
       this.assertCurrent(epoch);
     }
     await this.save(pair, epoch);
@@ -146,6 +149,7 @@ export class NativeApi {
     }
   }
   async login(email: string, password: string): Promise<MeDto> {
+    this.familyGeneration++;
     const epoch = ++this.generation;
     await this.save(null, epoch);
     const r = await this.fetch('auth/login', {
@@ -169,7 +173,6 @@ export class NativeApi {
     }, origin);
     const pair = await result.json() as TokenPair;
     if (origin !== this.epoch || intent !== this.switchIntent) {
-      void this.revoke(pair.refreshToken);
       throw new SessionChangedError();
     }
     const epoch = ++this.generation;
@@ -178,6 +181,7 @@ export class NativeApi {
   }
   async logout() {
     const token = this.pair?.refreshToken;
+    this.familyGeneration++;
     const epoch = ++this.generation;
     try {
       await this.save(null, epoch);

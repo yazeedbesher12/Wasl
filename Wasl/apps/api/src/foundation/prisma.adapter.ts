@@ -120,10 +120,19 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
         return {
           credentialById: id => tx.user.findUnique({ where: { id }, select: credentialFields }),
           credentialByEmail: email => tx.user.findUnique({ where: { email }, select: credentialFields }),
-          refreshByHash: tokenHash => tx.refreshToken.findUnique({ where: { tokenHash }, select: { userId: true, expiresAt: true, revokedAt: true } }),
+          createFamily: async (id, userId) => {
+            await tx.$executeRaw`INSERT INTO public.session_families (id, user_id) VALUES (${id}::uuid, ${userId}::uuid)`;
+          },
+          familyActive: async (id, userId) => !!await tx.sessionFamily.findFirst({ where: { id, userId, revokedAt: null }, select: { id: true } }),
+          // Issuance and logout both write the same row. Serializable retries
+          // must observe any revocation that won the write conflict.
+          claimFamily: async (id, userId) => (await tx.sessionFamily.updateMany({
+            where: { id, userId, revokedAt: null }, data: { revision: { increment: 1 } },
+          })).count === 1,
+          revokeFamily: async (id, userId, revokedAt) => { await tx.sessionFamily.updateMany({ where: { id, userId, revokedAt: null }, data: { revokedAt } }); },
+          refreshByHash: tokenHash => tx.refreshToken.findUnique({ where: { tokenHash }, select: { userId: true, familyId: true, expiresAt: true, revokedAt: true } }),
           createRefresh: async data => { await tx.refreshToken.create({ data, select: { id: true } }); },
           consumeRefresh: async (tokenHash, now) => (await tx.refreshToken.updateMany({ where: { tokenHash, revokedAt: null, expiresAt: { gt: now } }, data: { revokedAt: now } })).count === 1,
-          revokeRefresh: async (tokenHash, now) => { await tx.refreshToken.updateMany({ where: { tokenHash, revokedAt: null }, data: { revokedAt: now } }); },
         };
       },
       schools: {

@@ -100,18 +100,16 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
   try {
     if (route === 'auth/logout') {
       if (session) session.valid = false;
-      const pending = refresh
-        ? refreshing.get(createHash('sha256').update(refresh).digest('hex'))
-        : undefined;
-      const replacement = pending ? await pending.catch(() => null) : null;
-      if (refresh)
-        await fetch(apiUrl() + '/auth/logout', {
+      if (refresh) {
+        const revoked = await fetch(apiUrl() + '/auth/logout', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refreshToken: replacement?.refreshToken ?? refresh }),
+          body: JSON.stringify({ refreshToken: refresh }),
           cache: 'no-store',
           signal: AbortSignal.timeout(20000),
         });
+        if (!revoked.ok) throw new Error('Session revocation failed');
+      }
       const response = NextResponse.json({ ok: true });
       clear(response);
       return response;
@@ -172,6 +170,8 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
       return NextResponse.json({ message: 'Session ended' }, { status: 401 });
     if (result.ok && ['auth/login', 'auth/switch-school'].includes(route)) {
       const data = (await result.json()) as TokenPair & { user?: unknown };
+      if (route === 'auth/switch-school' && !sessions.get(sessionId)?.valid)
+        return NextResponse.json({ message: 'Session ended' }, { status: 401 });
       if (session) session.valid = false;
       for (const [id, entry] of sessions) if (entry.expires < Date.now()) sessions.delete(id);
       const nextSession = randomUUID();

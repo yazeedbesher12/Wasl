@@ -25,10 +25,13 @@ export type LoginCredential = Pick<Person, 'id' | 'email' | 'active' | 'password
 export interface AuthenticationRepository {
   credentialById(id: string): Promise<LoginCredential | null>;
   credentialByEmail(email: string): Promise<LoginCredential | null>;
-  refreshByHash(hash: string): Promise<Pick<RefreshRecord, 'userId' | 'expiresAt' | 'revokedAt'> | null>;
+  createFamily(id: string, userId: string): Promise<void>;
+  familyActive(id: string, userId: string): Promise<boolean>;
+  claimFamily(id: string, userId: string): Promise<boolean>;
+  revokeFamily(id: string, userId: string, now: Date): Promise<void>;
+  refreshByHash(hash: string): Promise<Pick<RefreshRecord, 'userId' | 'familyId' | 'expiresAt' | 'revokedAt'> | null>;
   createRefresh(row: RefreshRecord): Promise<void>;
   consumeRefresh(hash: string, now: Date): Promise<boolean>;
-  revokeRefresh(hash: string, now: Date): Promise<void>;
 }
 export interface SchoolRepository {
   list(): Promise<School[]>;

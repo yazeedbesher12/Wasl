@@ -58,13 +58,23 @@ export class MemoryStorage implements FoundationStorage {
         return {
           credentialById: async id => credential(person(id)) ?? null,
           credentialByEmail: async email => credential(s.users.find(u => u.email === email)) ?? null,
+          createFamily: async (id, userId) => {
+            reference(person(userId));
+            unique(s.sessionFamilies.some(f => f.id === id));
+            s.sessionFamilies.push({ id, userId, revokedAt: null });
+          },
+          familyActive: async (id, userId) => s.sessionFamilies.some(f => f.id === id && f.userId === userId && !f.revokedAt),
+          claimFamily: async (id, userId) => s.sessionFamilies.some(f => f.id === id && f.userId === userId && !f.revokedAt),
+          revokeFamily: async (id, userId, at) => {
+            const family = s.sessionFamilies.find(f => f.id === id && f.userId === userId && !f.revokedAt);
+            if (family) family.revokedAt = at;
+          },
           refreshByHash: async hash => {
             const token = s.refresh.find(t => t.tokenHash === hash);
-            return token ? { userId: token.userId, expiresAt: token.expiresAt, revokedAt: token.revokedAt } : null;
+            return token ? { userId: token.userId, familyId: token.familyId, expiresAt: token.expiresAt, revokedAt: token.revokedAt } : null;
           },
-          createRefresh: async row => { reference(person(row.userId)); unique(s.refresh.some(t => t.tokenHash === row.tokenHash || t.id === row.id)); s.refresh.push(row); },
+          createRefresh: async row => { reference(s.sessionFamilies.some(f => f.id === row.familyId && f.userId === row.userId)); unique(s.refresh.some(t => t.tokenHash === row.tokenHash || t.id === row.id)); s.refresh.push(row); },
           consumeRefresh: async (hash, at) => { const token = s.refresh.find(t => t.tokenHash === hash && !t.revokedAt && t.expiresAt > at); if (!token) return false; token.revokedAt = at; return true; },
-          revokeRefresh: async (hash, at) => { const token = s.refresh.find(t => t.tokenHash === hash && !t.revokedAt); if (token) token.revokedAt = at; },
         };
       },
       schools: {
