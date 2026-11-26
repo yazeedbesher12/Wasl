@@ -1,10 +1,11 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { extname } from 'node:path';
-import type { FileDto } from '@wasl/shared';
+import type { FileDto, ParentFileContext } from '@wasl/shared';
 import type { AuthUser } from '../auth/auth.types';
 import type { FileObject } from '../foundation/entities';
 import { requireActor } from '../foundation/authorization';
+import { withVerifiedChild } from '../foundation/parent-learning.service';
 import type { FileUploadDto } from '../foundation/communication.dto';
 import { STORAGE } from '../foundation/repositories';
 import type { FoundationStorage, Repositories } from '../foundation/repositories';
@@ -51,7 +52,21 @@ export class FileService {
       throw error;
     }
   }
-  private async authorizedFile(actor: AuthUser, lookup: (r: Repositories) => Promise<FileObject | null>) {
+  private async authorizedFile(actor: AuthUser, lookup: (r: Repositories) => Promise<FileObject | null>, child?: ParentFileContext) {
+    if (child) {
+      try {
+        return await withVerifiedChild(this.storage, actor, child.studentId, child.schoolId, async r => {
+          const file = await lookup(r);
+          if (file?.purpose !== 'LESSON_RESOURCE' || file.schoolId !== child.schoolId)
+            throw new NotFoundException('File not found');
+          await authorizeFile(r, actor, file, child.studentId);
+          return file;
+        });
+      } catch (error) {
+        if (error instanceof NotFoundException) throw new NotFoundException('File not found');
+        throw error;
+      }
+    }
     // Use parent file metadata only to bind the follow-up proof to one child. The
     // authorization transaction looks up the file again and rechecks the link.
     const candidate = actor.role === 'PARENT' ? await this.scope(actor, lookup) : null;
@@ -63,17 +78,19 @@ export class FileService {
       return file;
     }, participant);
   }
-  async resolve(actor: AuthUser, key: string) { return fileDto(await this.authorizedFile(actor, r => r.files.byKey(key))); }
-  metadata(actor: AuthUser, id: string) {
-    return this.authorizedFile(actor, r => r.files.get(id)).then(fileDto);
+  async resolve(actor: AuthUser, key: string, child?: ParentFileContext) {
+    return fileDto(await this.authorizedFile(actor, r => r.files.byKey(key), child));
   }
-  async download(actor: AuthUser, id: string) {
-    const f = await this.authorizedFile(actor, r => r.files.get(id));
+  metadata(actor: AuthUser, id: string, child?: ParentFileContext) {
+    return this.authorizedFile(actor, r => r.files.get(id), child).then(fileDto);
+  }
+  async download(actor: AuthUser, id: string, child?: ParentFileContext) {
+    const f = await this.authorizedFile(actor, r => r.files.get(id), child);
     if (f.storageDriver !== this.objects.driver) throw new ServiceUnavailableException('The configured file store does not hold this file');
     const data = await this.objects.get(f.storageKey);
     if (data.length !== f.size || createHash('sha256').update(data).digest('hex') !== f.sha256) throw new ServiceUnavailableException('Stored file integrity check failed');
     // Do not return bytes after a role/link/publication change during retrieval.
-    await this.authorizedFile(actor, r => r.files.get(id));
+    await this.authorizedFile(actor, r => r.files.get(id), child);
     return { data, metadata: fileDto(f) };
   }
 }

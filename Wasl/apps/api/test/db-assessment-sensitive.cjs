@@ -9,6 +9,7 @@ const { LearningService } = require('../src/foundation/learning.service');
 const { AssessmentService } = require('../src/foundation/assessment.service');
 const { ContentService } = require('../src/foundation/content.service');
 const { CommunicationService } = require('../src/foundation/communication.service');
+const { ParentLearningService } = require('../src/foundation/parent-learning.service');
 const { FileService } = require('../src/files/file.service');
 
 const roles = { tenant: 'wasl_tenant', auth: 'wasl_auth', platform: 'wasl_platform', academicAdmin: 'wasl_academic_admin', assessmentStaff: 'wasl_assessment_staff' };
@@ -368,6 +369,7 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
     await grading.transition(b.teacher, assessment.id, 'release');
     assert.deepEqual((await files.download(b.parent, file.id)).data, bytes);
     await assert.rejects(files.metadata(a.parent, file.id), notFound);
+    await assert.rejects(files.download(b.parent, file.id, { studentId: b.student.sub, schoolId: b.school.id }), notFound);
   });
 
   await t.test('learner rows require verified school, participant and publication scope', async () => {
@@ -665,6 +667,64 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
     }
     assert.equal((await grading.ownSubmission(f.student, f.assessment.id)).score, 4);
     assert.equal((await grading.ownSubmission(f.peer, f.assessment.id)).score, 4);
+  });
+
+  await t.test('verified child scope authorizes only enrolled, published lesson files across schools', async () => {
+    const home = await fixtures('Fictional File Home');
+    const partner = await fixtures('Fictional File Partner');
+    const files = temporaryFiles();
+    const parents = new ParentLearningService(storage);
+    await foundation.addMembership(partner.admin, { email: home.parent.email, role: 'PARENT' });
+    const link = await foundation.createLink(partner.admin, { parentId: home.parent.sub, studentId: partner.student.sub });
+    await foundation.linkStatus(partner.admin, link.id, 'VERIFIED');
+    const peerLink = await foundation.createLink(partner.admin, { parentId: home.parent.sub, studentId: partner.peer.sub });
+    await foundation.linkStatus(partner.admin, peerLink.id, 'VERIFIED');
+    await foundation.saveAcademic(partner.admin, 'enrollments', { status: 'WITHDRAWN' }, partner.peerEnrollment.id);
+    const child = { studentId: partner.student.sub, schoolId: partner.school.id };
+    const peer = { studentId: partner.peer.sub, schoolId: partner.school.id };
+    const bytes = Buffer.from('Fictional private worksheet');
+    async function upload(fixture) {
+      const unit = await content.createUnit(fixture.teacher, { sectionSubjectId: fixture.assignment.id, title: 'Fictional worksheet unit' });
+      const lesson = await content.createLesson(fixture.teacher, { unitId: unit.id, title: 'Fictional worksheet lesson' });
+      const file = await files.upload(fixture.teacher, { purpose: 'LESSON_RESOURCE', lessonId: lesson.id },
+        { buffer: bytes, size: bytes.length, originalname: 'worksheet.txt', mimetype: 'text/plain' });
+      return { lesson, file };
+    }
+    const { lesson, file } = await upload(partner);
+    const { file: foreign } = await upload(home);
+    const resource = { lessonId: lesson.id, type: 'FILE', title: 'Fictional worksheet' };
+    await assert.rejects(learning.createResource(partner.teacher, { ...resource, storageKey: foreign.storageKey }),
+      e => e.getStatus?.() === 400);
+    await learning.createResource(partner.teacher, { ...resource, storageKey: file.storageKey });
+    await assert.rejects(files.resolve(home.parent, file.storageKey, child), notFound);
+    await content.updateLesson(partner.teacher, lesson.id, { status: 'PUBLISHED' });
+
+    const bundle = await parents.bundle(home.parent, child.studentId, child.schoolId);
+    assert.ok(bundle.resources.some(row => row.storageKey === file.storageKey));
+    assert.equal((await files.resolve(home.parent, file.storageKey, child)).id, file.id);
+    assert.equal((await files.metadata(home.parent, file.id, child)).id, file.id);
+    assert.deepEqual((await files.download(home.parent, file.id, child)).data, bytes);
+    await assert.rejects(files.resolve(home.parent, foreign.storageKey, child), notFound);
+    await assert.rejects(files.metadata(home.parent, file.id, peer), notFound);
+    await assert.rejects(files.metadata(home.parent, file.id, { ...child, schoolId: home.school.id }), notFound);
+    await assert.rejects(files.metadata(partner.parent, file.id, peer), notFound);
+    await assert.rejects(files.metadata(partner.parent, foreign.id, child), notFound);
+    await assert.rejects(files.metadata(home.parent, file.id, { studentId: home.student.sub, schoolId: home.school.id }), notFound);
+
+    const read = async (studentId, operation) => db.$transaction(async tx => {
+      await install(tx, await proof(tx, home.parent, studentId, operation, { school: partner.school.id }));
+      return tx.$queryRaw`SELECT id FROM public.file_objects WHERE id = ${file.id}::uuid`;
+    });
+    assert.deepEqual(await read(child.studentId, 'read'), [{ id: file.id }]);
+    assert.deepEqual(await read(peer.studentId, 'read'), []);
+    await foundation.saveAcademic(partner.admin, 'enrollments', { status: 'WITHDRAWN' }, partner.enrollment.id);
+    await assert.rejects(files.download(home.parent, file.id, child), notFound);
+    assert.deepEqual(await read(child.studentId, 'read'), []);
+    await foundation.saveAcademic(partner.admin, 'enrollments', { status: 'ACTIVE' }, partner.enrollment.id);
+    assert.equal((await files.metadata(home.parent, file.id, child)).id, file.id);
+    await foundation.linkStatus(partner.admin, link.id, 'REJECTED');
+    await assert.rejects(files.download(home.parent, file.id, child), notFound);
+    assert.deepEqual(await read(child.studentId, 'read'), []);
   });
 
   await t.test('school metadata and linked child profiles stay scoped across schools and revocation', async () => {

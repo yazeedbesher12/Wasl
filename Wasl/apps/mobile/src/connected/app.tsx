@@ -275,7 +275,10 @@ function Content() {
         {record.type === 'FILE' && typeof record.storageKey === 'string' && (
           <Button
             onPress={() =>
-              void n.run(() => download(api, String(record.storageKey)), undefined, false)
+              void n.run(() => download(api, String(record.storageKey),
+                role === 'PARENT' && n.child
+                  ? { studentId: n.child.student.id, schoolId: n.child.school.id }
+                  : undefined), undefined, false)
             }
           >
             {ar ? 'تنزيل الملف' : 'Download file'}

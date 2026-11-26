@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 import { File, Paths } from 'expo-file-system';
-import type { FileDto } from '@wasl/shared';
+import type { FileDto, ParentFileContext } from '@wasl/shared';
 import type { NativeApi } from './transport';
 
 export async function upload(
@@ -44,13 +44,15 @@ export async function upload(
   api.assertCurrent(epoch);
   return uploaded;
 }
-export async function download(api: NativeApi, storageKey: string) {
+export async function download(api: NativeApi, storageKey: string, child?: ParentFileContext) {
   const epoch = api.epoch;
+  const childQuery = new URLSearchParams(child ? { ...child } : {}).toString();
+  const resolveQuery = new URLSearchParams({ storageKey, ...child }).toString();
   const metadata = await api.call<FileDto>(
-    'files/resolve?storageKey=' + encodeURIComponent(storageKey),
+    'files/resolve?' + resolveQuery,
     'GET', undefined, epoch,
   );
-  const response = await api.response('files/' + metadata.id + '/content', {}, epoch);
+  const response = await api.response('files/' + metadata.id + '/content' + (childQuery ? '?' + childQuery : ''), {}, epoch);
   if (Platform.OS === 'web') {
     const blob = await response.blob();
     api.assertCurrent(epoch);

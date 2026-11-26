@@ -149,6 +149,9 @@ describe('Private files, announcements and notifications API', () => {
     await call('teacher', 'post', `/submissions/${final.body.id}/grade`, { answers: [{ questionId: a.questionId, score: 5 }] });
     await call('teacher', 'post', `/assessments/${a.assessmentId}/release`);
     expect((await call('parent', 'get', `/files/${f.id}/content`)).status).toBe(200);
+    const context = `studentId=${id(112)}&schoolId=${id(1)}`;
+    expect((await call('parent', 'get', `/files/${f.id}/content?${context}`)).status).toBe(404);
+    expect((await call('parent', 'get', `/files/resolve?storageKey=${encodeURIComponent(peer.storageKey)}&${context}`)).status).toBe(404);
     await call('admin', 'patch', `/parent-links/${id(601)}`, { status: 'REJECTED' });
     expect((await call('parent', 'get', `/files/${f.id}/content`)).status).toBe(404);
     await call('admin', 'patch', `/parent-links/${id(601)}`, { status: 'VERIFIED' });
