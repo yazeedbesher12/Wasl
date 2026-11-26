@@ -5,7 +5,7 @@ import type { Repositories } from './repositories';
 import type { Membership } from './entities';
 
 export async function activeMembership(r: Repositories, userId: string, membershipId: string): Promise<Membership> {
-  const user = await r.identity.personById(userId);
+  const user = await r.identity.directoryPersonById(userId);
   const membership = (await r.identity.membershipsFor(userId)).find(m => m.id === membershipId && m.active);
   if (!user?.active || !membership) throw new UnauthorizedException('Active account or membership unavailable');
   if (membership.role === 'PLATFORM_ADMIN') { if (membership.schoolId !== null) throw new UnauthorizedException('Invalid membership'); }

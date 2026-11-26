@@ -195,7 +195,7 @@ export class AssessmentService {
         await notify(r, a.schoolId, 'RESULTS_RELEASED', await studentAndParentRecipients(r, a.sectionSubjectId, submission.studentId), { entityId: a.id, sectionSubjectId: a.sectionSubjectId });
       }
       return this.detail(r, updated, true);
-    });
+    }, action === 'release' ? { operation: 'staff-release', targetId: id } : undefined);
   }
 
   private submissionDto(a: Assessment, s: SubmissionWithAnswers, staff = false): SubmissionDto {

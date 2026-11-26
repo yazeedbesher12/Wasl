@@ -3,7 +3,7 @@ import { ConflictException, ForbiddenException, NotFoundException, ServiceUnavai
 import type { Prisma } from '@prisma/client';
 import { prismaAssessments } from './assessment.prisma.repository';
 import { PrismaService } from '../prisma/prisma.service';
-import type { AcademicKind, AcademicMap, Membership, SafeQuestionWithOptions } from './entities';
+import type { AcademicKind, AcademicMap, Membership, PersonProfile, SafeQuestionWithOptions } from './entities';
 import type { FoundationStorage, Repositories, StorageScope } from './repositories';
 
 const profileFields = { id: true, email: true, fullName: true, preferredLanguage: true, active: true, createdAt: true } satisfies Prisma.UserSelect;
@@ -51,6 +51,7 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
   }
   private repositories(tx: Prisma.TransactionClient, scope: StorageScope): Repositories {
     const schoolId = scope.schoolId ?? '00000000-0000-4000-8000-000000000000';
+    const scopedDirectory = scope.kind === 'school' || scope.kind === 'parent-list' || scope.kind === 'academic-administration' || scope.kind === 'assessment-staff';
     const where = { schoolId };
     const scoped = (row: { schoolId: string }) => { if (row.schoolId !== scope.schoolId) throw new NotFoundException('Record not found'); };
     const platform = () => { if (scope.kind !== 'platform') throw new ForbiddenException(); };
@@ -98,8 +99,18 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
       communication: prismaCommunication(tx, schoolId, scope.userId),
       assessments: prismaAssessments(tx, schoolId, scope.kind === 'assessment-staff', scope.assessment?.operation === 'results'),
       identity: {
-        personById: id => tx.user.findUnique({ where: { id }, select: profileFields }),
-        personByEmail: email => tx.user.findUnique({ where: { email }, select: profileFields }),
+        directoryPersonById: id => tx.user.findUnique({ where: { id }, select: { id: true, fullName: true, active: true } }),
+        personById: async id => {
+          if (!scopedDirectory) return tx.user.findUnique({ where: { id }, select: profileFields });
+          const [row] = await tx.$queryRaw<PersonProfile[]>`
+            SELECT id, email, full_name AS "fullName", preferred_language::text AS "preferredLanguage", active, created_at AS "createdAt"
+            FROM wasl_directory.contact_profiles WHERE id = ${id}::uuid`;
+          return row ?? null;
+        },
+        personByEmail: email => {
+          if (scopedDirectory) throw new ForbiddenException();
+          return tx.user.findUnique({ where: { email }, select: profileFields });
+        },
         membershipsFor: userId => tx.membership.findMany({ where: { userId } }),
         createPerson: data => tx.user.create({ data, select: profileFields }),
         updateProfile: (id, data) => tx.user.update({ where: { id }, data, select: profileFields }),
@@ -138,7 +149,12 @@ export class PrismaStorage implements FoundationStorage, OnModuleDestroy {
           if (!membership) throw new NotFoundException('Referenced record not found');
           return membership;
         },
-        eligible: async (userId, role) => !!await tx.membership.findFirst({ where: { ...where, userId, role, active: true, user: { active: true } } }),
+        eligible: async (userId, role) => {
+          if (!scopedDirectory) return !!await tx.membership.findFirst({ where: { ...where, userId, role, active: true, user: { active: true } } });
+          const [row] = await tx.$queryRaw<{ eligible: boolean }[]>`
+            SELECT wasl_directory.is_eligible(${schoolId}::uuid, ${userId}::uuid, ${role}::public."Role") AS eligible`;
+          return row.eligible;
+        },
       },
       academics: {
         list: kind => table(kind).list(), get: (kind, id) => table(kind).get(id),

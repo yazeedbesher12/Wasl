@@ -108,6 +108,86 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
     return { payload, tag: createHmac('sha256', key).update(payload).digest('hex') };
   }
 
+  await t.test('directory names, contact fields and roster joins require the right relationship', async () => {
+    const ids = rows => rows.map(row => row.id).sort();
+    const names = tx => tx.$queryRaw`SELECT id, full_name FROM public.users`;
+    const contacts = tx => tx.$queryRaw`SELECT id, email FROM wasl_directory.contact_profiles`;
+    const scoped = (who, work) => db.$transaction(async tx => {
+      await install(tx, await proof(tx, who, who.sub, 'read'));
+      return work(tx);
+    });
+    assert.deepEqual(await names(db), []);
+    assert.deepEqual(await contacts(db), []);
+    await assert.rejects(db.$queryRaw`SELECT email FROM public.users`, denied);
+    await assert.rejects(db.$queryRaw`SELECT * FROM wasl_directory.actor_scope()`, denied);
+    await assert.rejects(db.$executeRaw`SET ROLE wasl_subject_verifier`, denied);
+    await assert.rejects(db.$executeRaw`UPDATE public.users SET full_name = 'No' WHERE false`, denied);
+    await assert.rejects(db.$executeRaw`UPDATE public.schools SET name = 'No' WHERE false`, denied);
+
+    const roster = await foundation.roster(a.teacher, a.assignment.id, { page: 1, limit: 100 });
+    assert.deepEqual(roster.items.map(item => item.student.id).sort(), [a.student.sub, a.peer.sub].sort());
+    await scoped(a.teacher, async tx => {
+      assert.deepEqual(ids(await names(tx)), [a.teacher.sub, a.student.sub, a.peer.sub].sort());
+      assert.deepEqual(await contacts(tx), [{ id: a.teacher.sub, email: a.teacher.email }]);
+      const joined = await tx.$queryRaw`SELECT u.id FROM public.users u JOIN public.memberships m ON m.user_id = u.id WHERE m.role = 'STUDENT'`;
+      assert.deepEqual(ids(joined), [a.student.sub, a.peer.sub].sort());
+    });
+    await scoped(a.student, async tx => {
+      assert.deepEqual(ids(await names(tx)), [a.student.sub, a.teacher.sub].sort());
+      assert.deepEqual(await contacts(tx), [{ id: a.student.sub, email: a.student.email }]);
+    });
+    const adminUsers = await foundation.listUsers(a.admin, { page: 1, limit: 100 });
+    assert.ok(adminUsers.items.some(row => row.id === a.student.sub && row.email === a.student.email));
+    assert.ok(adminUsers.items.every(row => row.id !== b.student.sub));
+    await scoped(a.admin, async tx => {
+      const rows = await contacts(tx);
+      assert.ok(rows.some(row => row.id === a.student.sub && row.email === a.student.email));
+      assert.ok(rows.every(row => row.id !== b.student.sub && row.id !== b.admin.sub));
+    });
+  });
+
+  await t.test('independent audit checks bank ownership and assessment workflow integrity', async t => {
+    const rolledBack = new Error('Roll back independent audit fixture');
+    async function auditWrite(actor, target, description, statement) {
+      let outcome;
+      try {
+        await clients.assessmentStaff.$transaction(async tx => {
+          await install(tx, await proof(tx, actor, target, 'staff-write'));
+          outcome = (await statement(tx)) === 1 ? 'ALLOWED' : 'FILTERED';
+          throw rolledBack;
+        });
+        assert.fail('The audit transaction must roll back');
+      } catch (error) {
+        if (error !== rolledBack) {
+          assert.ok(['42501', '23503', '23514'].includes(error.meta?.code), error.message);
+          outcome = `DENIED (${error.meta.code})`;
+        }
+      }
+      t.diagnostic(`${description}: ${outcome}`);
+      return outcome;
+    }
+    const bankId = randomUUID();
+    const bankOwner = await auditWrite(a.admin, a.admin.sub, 'School administrator assigns a question bank to a foreign school teacher', tx => tx.$executeRaw`
+      INSERT INTO public.question_banks (id, school_id, subject_id, owner_id, name)
+      VALUES (${bankId}::uuid, ${a.school.id}::uuid, ${a.assignment.subjectId}::uuid, ${b.teacher.sub}::uuid, 'Fictional audit bank')`);
+    assert.match(bankOwner, /^DENIED/);
+    await assert.rejects(clients.academicAdmin.$transaction(async tx => {
+      await install(tx, await proof(tx, a.admin, a.admin.sub, 'academic-write'));
+      return tx.$executeRaw`INSERT INTO public.section_subjects (id, school_id, section_id, subject_id, teacher_id)
+        VALUES (${randomUUID()}::uuid, ${a.school.id}::uuid, ${a.section.id}::uuid, ${a.unassigned.id}::uuid, ${b.teacher.sub}::uuid)`;
+    }), denied);
+    const broadWrite = await auditWrite(a.teacher, a.teacher.sub, 'Assigned teacher releases an open ungraded assessment through direct SQL', tx => tx.$executeRaw`
+      UPDATE public.assessments SET status = 'RESULTS_RELEASED', results_released_at = CURRENT_TIMESTAMP
+      WHERE id = ${a.assessment.id}::uuid`);
+    assert.match(broadWrite, /^(DENIED|FILTERED)/);
+    await assert.rejects(clients.assessmentStaff.$transaction(async tx => {
+      await install(tx, await proof(tx, a.teacher, a.assessment.id, 'staff-release'));
+      return tx.$executeRaw`UPDATE public.assessments SET status = 'RESULTS_RELEASED', results_released_at = CURRENT_TIMESTAMP
+        WHERE id = ${a.assessment.id}::uuid`;
+    }), denied);
+    assert.equal((await grading.get(a.teacher, a.assessment.id)).status, 'OPEN');
+  });
+
   await t.test('academic reads follow verified assignments, enrollments and parent links', async () => {
     const read = tx => tx.$queryRaw`SELECT e.id FROM public.enrollments e JOIN public.sections s ON s.id = e.section_id
       JOIN public.grades g ON g.id = s.grade_id JOIN public.academic_years y ON y.id = s.academic_year_id
@@ -422,6 +502,11 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
     await grading.transition(a.teacher, a.assessment.id, 'close');
     const staff = clients.assessmentStaff;
     await assert.rejects(staff.$transaction(async tx => {
+      await install(tx, await proof(tx, a.teacher, a.assessment.id, 'staff-release'));
+      return tx.$executeRaw`UPDATE public.assessments SET status = 'RESULTS_RELEASED', results_released_at = CURRENT_TIMESTAMP
+        WHERE id = ${a.assessment.id}::uuid`;
+    }), denied);
+    await assert.rejects(staff.$transaction(async tx => {
       await install(tx, await proof(tx, a.teacher, draft.id, 'staff-grade'));
       return tx.$executeRaw`UPDATE public.answers SET response = '"Fictional replacement"'::jsonb WHERE submission_id = ${draft.id}::uuid`;
     }), denied);
@@ -488,4 +573,64 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
     });
     await assert.rejects(grading.childResults(a.parent, a.student.sub, page), notFound);
   });
+
+  await t.test('school metadata and linked child profiles stay scoped across schools and revocation', async () => {
+    const schools = tx => tx.$queryRaw`SELECT id FROM public.schools ORDER BY id`;
+    const names = tx => tx.$queryRaw`SELECT id FROM public.users ORDER BY id`;
+    assert.deepEqual(await schools(db), []);
+    const parentMembership = await foundation.addMembership(b.admin, { email: a.parent.email, role: 'PARENT' });
+    const newLink = await foundation.createLink(b.admin, { parentId: a.parent.sub, studentId: b.student.sub });
+    await foundation.linkStatus(b.admin, newLink.id, 'VERIFIED');
+    const overview = await foundation.childOverview(a.parent, b.student.sub, b.school.id);
+    assert.equal(overview.school.id, b.school.id);
+    assert.equal(overview.student.id, b.student.sub);
+    let captured;
+    await db.$transaction(async tx => {
+      await tx.$queryRaw`SELECT set_config('app.school_id', ${b.school.id}, true), set_config('app.user_id', ${a.parent.sub}, true), set_config('app.bypass_rls', 'on', true)`;
+      assert.deepEqual(await schools(tx), []);
+      const valid = await proof(tx, a.parent, b.student.sub, 'read', { school: b.school.id });
+      captured = valid;
+      for (const invalid of [{ ...valid, tag: '0'.repeat(64) }, await proof(tx, a.parent, b.student.sub, 'read', { school: b.school.id, expires: Date.now() - 5000 }),
+        await proof(tx, a.parent, b.student.sub, 'read', { school: b.school.id, actor: b.parent.sub })]) {
+        await install(tx, invalid);
+        assert.deepEqual(await names(tx), []);
+        assert.deepEqual(await schools(tx), []);
+      }
+      await install(tx, valid);
+      assert.deepEqual((await schools(tx)).map(row => row.id), [a.school.id, b.school.id].sort());
+      assert.deepEqual((await names(tx)).map(row => row.id), [a.parent.sub, b.student.sub, b.teacher.sub].sort());
+      await other.$transaction(async second => {
+        await install(second, valid);
+        assert.deepEqual(await names(second), []);
+        assert.deepEqual(await schools(second), []);
+      });
+    });
+    await db.$transaction(async later => { await install(later, captured); assert.deepEqual(await schools(later), []); });
+    assert.deepEqual(await names(db), []);
+
+    const second = await foundation.addMembership(b.admin, { email: a.student.email, role: 'STUDENT' });
+    const switchedActor = { ...a.student, schoolId: b.school.id, membershipId: second.id };
+    await db.$transaction(async tx => {
+      await install(tx, await proof(tx, a.student, a.student.sub, 'read'));
+      assert.deepEqual(await schools(tx), [{ id: a.school.id }]);
+      await install(tx, await proof(tx, switchedActor, a.student.sub, 'read'));
+      assert.deepEqual(await schools(tx), [{ id: b.school.id }]);
+    });
+    await foundation.membership(b.admin, second.id, false);
+    await db.$transaction(async tx => {
+      await install(tx, await proof(tx, switchedActor, a.student.sub, 'read'));
+      assert.deepEqual(await names(tx), []);
+      assert.deepEqual(await schools(tx), []);
+    });
+
+    await foundation.linkStatus(b.admin, newLink.id, 'REJECTED');
+    await db.$transaction(async tx => {
+      await install(tx, await proof(tx, a.parent, b.student.sub, 'read', { school: b.school.id }));
+      assert.deepEqual(await names(tx), [{ id: a.parent.sub }]);
+      assert.deepEqual(await schools(tx), [{ id: a.school.id }]);
+    });
+    await assert.rejects(foundation.childOverview(a.parent, b.student.sub, b.school.id), notFound);
+    await foundation.membership(b.admin, parentMembership.id, false);
+  });
+
 });

@@ -89,7 +89,11 @@ test('actual PostgreSQL execution credentials enforce the identity boundary', as
       tx => tx.$executeRaw`SET ROLE wasl_migrate`,
     ];
     for (const operation of operations) await rejectSql(tenant, operation, denied, true);
-    assert.deepEqual(await tenant.$queryRaw`SELECT id, email FROM public.users WHERE id = ${platformUser.id}::uuid`, [platformUser]);
+    // The original positive projection belongs to platform provisioning. The
+    // same read is now explicitly denied on the ordinary tenant credential.
+    assert.deepEqual(await platform.$queryRaw`SELECT id, email FROM public.users WHERE id = ${platformUser.id}::uuid`, [platformUser]);
+    await assert.rejects(tenant.$queryRaw`SELECT id, email FROM public.users WHERE id = ${platformUser.id}::uuid`, denied);
+    assert.deepEqual(await tenant.$queryRaw`SELECT id FROM public.users WHERE id = ${platformUser.id}::uuid`, []);
   });
 
   await t.test('authentication and administration have distinct privileges', async () => {

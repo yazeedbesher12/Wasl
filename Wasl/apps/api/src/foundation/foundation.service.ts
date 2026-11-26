@@ -196,14 +196,14 @@ export class FoundationService {
       else {
         const e = v as Enrollment;
         if (e.status === 'ACTIVE') { if (!await r.people.eligible(e.studentId, 'STUDENT')) throw notFound(); }
-        else if (!(await r.people.memberships()).some(m => m.userId === e.studentId && m.role === 'STUDENT') || !await r.identity.personById(e.studentId)) throw notFound();
+        else if (!(await r.people.memberships()).some(m => m.userId === e.studentId && m.role === 'STUDENT') || !await r.identity.directoryPersonById(e.studentId)) throw notFound();
       }
     }
   }
   private async classDto(r: Repositories, assignment: SectionSubject): Promise<ClassDto> {
     const section = await r.academics.get('sections', assignment.sectionId); const subject = await r.academics.get('subjects', assignment.subjectId); if (!section || !subject) throw notFound();
     const grade = await r.academics.get('grades', section.gradeId); const year = await r.academics.get('academicYears', section.academicYearId); if (!grade || !year) throw notFound();
-    const teacher = assignment.teacherId && await r.people.eligible(assignment.teacherId, 'TEACHER') ? await r.identity.personById(assignment.teacherId) : null;
+    const teacher = assignment.teacherId && await r.people.eligible(assignment.teacherId, 'TEACHER') ? await r.identity.directoryPersonById(assignment.teacherId) : null;
     return { assignment: academicDto('sectionSubjects', assignment), section: academicDto('sections', section), subject: academicDto('subjects', subject), grade: academicDto('grades', grade), academicYear: academicDto('academicYears', year), teacher: teacher ? { id: teacher.id, fullName: teacher.fullName } : null };
   }
   classes(actor: AuthUser, q: ListDto) { return this.school(actor, ['TEACHER', 'STUDENT'], async r => {
@@ -215,12 +215,12 @@ export class FoundationService {
     const assignment = (await this.visibleAcademic(r, actor, 'sectionSubjects')).find(a => a.id === assignmentId); if (!assignment) throw notFound();
     const entries: (RosterEntryDto & { id: string })[] = [];
     for (const e of await this.visibleAcademic(r, actor, 'enrollments')) if (e.sectionId === assignment.sectionId && e.status === 'ACTIVE' && await r.people.eligible(e.studentId, 'STUDENT')) {
-      const student = await r.identity.personById(e.studentId); if (student) entries.push({ id: e.id, enrollment: academicDto('enrollments', e), student: { id: student.id, fullName: student.fullName } });
+      const student = await r.identity.directoryPersonById(e.studentId); if (student) entries.push({ id: e.id, enrollment: academicDto('enrollments', e), student: { id: student.id, fullName: student.fullName } });
     }
     const page = pageOf(entries, q, e => e.student.fullName); return { ...page, items: page.items.map(({ id: _id, ...row }) => row) };
   }, 'school', { operation: 'read' }); }
   overview(actor: AuthUser) { return this.school(actor, ['SCHOOL_ADMIN'], r => this.overviewInside(r, actor), 'school', { operation: 'read' }); }
-  private async overviewInside(r: Repositories, actor: Pick<AuthUser, 'role' | 'sub' | 'schoolId'>, student?: PersonProfile): Promise<AcademicOverviewDto> {
+  private async overviewInside(r: Repositories, actor: Pick<AuthUser, 'role' | 'sub' | 'schoolId'>, student?: Pick<PersonProfile, 'id' | 'fullName'>): Promise<AcademicOverviewDto> {
     const school = await r.schools.get(actor.schoolId!); if (!school) throw notFound();
     const rows = await this.visibleAcademic(r, actor, 'sectionSubjects'); const enrollments = await this.visibleAcademic(r, actor, 'enrollments');
     return { school: schoolDto(school), student: student ? { id: student.id, fullName: student.fullName } : null, classes: await Promise.all(rows.map(a => this.classDto(r, a))), enrollments: enrollments.map(e => academicDto('enrollments', e)), counts: { academicYears: (await this.visibleAcademic(r, actor, 'academicYears')).length, sections: (await this.visibleAcademic(r, actor, 'sections')).length, subjects: (await this.visibleAcademic(r, actor, 'subjects')).length, assignments: rows.length, activeEnrollments: enrollments.filter(e => e.status === 'ACTIVE').length } };
@@ -243,14 +243,14 @@ export class FoundationService {
       assessment: { membershipId: actor.membershipId, operation: 'discover', targetId: actor.sub } },
     async r => { await requireActor(r, actor, ['PARENT']); return r.links.forParent(actor.sub); });
   }
-  private parentChild<T>(actor: AuthUser, link: ParentLink, work: (r: Repositories, student: PersonProfile) => Promise<T>) {
+  private parentChild<T>(actor: AuthUser, link: ParentLink, work: (r: Repositories, student: Pick<PersonProfile, 'id' | 'fullName'>) => Promise<T>) {
     return this.storage.run({ kind: 'school', userId: actor.sub, schoolId: link.schoolId,
       subjects: { membershipId: actor.membershipId, access: { operation: 'read', childId: link.studentId } },
       assessment: { membershipId: actor.membershipId, operation: 'read', targetId: link.studentId } }, async r => {
       await requireActor(r, actor, ['PARENT']);
       const current = (await r.links.forParent(actor.sub)).find(l => l.id === link.id && l.studentId === link.studentId && l.status === 'VERIFIED');
       if (!current || !(await r.schools.get(link.schoolId))?.active || !await r.people.eligible(actor.sub, 'PARENT') || !await r.people.eligible(link.studentId, 'STUDENT')) throw notFound();
-      const student = await r.identity.personById(link.studentId); if (!student?.active) throw notFound(); return work(r, student);
+      const student = await r.identity.directoryPersonById(link.studentId); if (!student?.active) throw notFound(); return work(r, student);
     });
   }
   async children(actor: AuthUser, q: ListDto): Promise<Page<ChildDto>> {

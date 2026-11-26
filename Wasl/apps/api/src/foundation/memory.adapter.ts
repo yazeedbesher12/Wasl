@@ -46,6 +46,7 @@ export class MemoryStorage implements FoundationStorage {
       communication: memoryCommunication(s, scope.schoolId, scope.userId),
       assessments: memoryAssessments(s, scope.schoolId),
       identity: {
+        directoryPersonById: async id => { const user = person(id); return user ? { id: user.id, fullName: user.fullName, active: user.active } : null; },
         personById: async id => { const user = person(id); return user ? profile(user) : null; },
         personByEmail: async email => { const user = s.users.find(u => u.email === email); return user ? profile(user) : null; },
         membershipsFor: async id => s.memberships.filter(m => m.userId === id),

@@ -20,7 +20,7 @@ describe('Prisma identity projection', () => {
   beforeEach(() => jest.clearAllMocks());
 
   it('selects only profile fields for profile reads and writes', async () => {
-    await storage.run(school, async ({ identity }) => {
+    await storage.run({ ...school, kind: 'school-administration' }, async ({ identity }) => {
       await identity.personById(person.id);
       await identity.personByEmail(person.email);
       await identity.createPerson(person);
@@ -34,6 +34,11 @@ describe('Prisma identity projection', () => {
     expect(update).toHaveBeenCalledWith({
       where: { id: person.id }, data: { fullName: person.fullName, preferredLanguage: 'en' }, select,
     });
+  });
+
+  it('uses only directory fields for a relationship profile lookup', async () => {
+    await storage.run(school, ({ identity }) => identity.directoryPersonById(person.id));
+    expect(findUnique).toHaveBeenCalledWith({ where: { id: person.id }, select: { id: true, fullName: true, active: true } });
   });
 
   it('selects password verification fields in authentication scope', async () => {
