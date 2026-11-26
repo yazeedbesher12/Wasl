@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "test:session": "node --test test/session-proxy.cjs",
     "test:integration": "node test/api-flows.cjs",
     "test:mobile": "node test/mobile-flows.cjs"
   },

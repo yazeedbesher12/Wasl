@@ -97,22 +97,27 @@ function useSessionState() {
     }
   };
   const logout = async () => {
-    generation.current++;
+    if (busy) return;
+    const retry = error === 'revocationUnconfirmed';
+    const current = ++generation.current;
     setBusy(true);
     setError('');
+    setUser(null);
     try {
       const r = await fetch('/api/wasl/auth/logout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}',
       });
-      if (!r.ok) throw new Error();
-      setUser(null);
-      broadcast();
-      router.replace('/login');
+      if (!r.ok || (retry && (await r.json()).revocation === 'not-requested'))
+        throw new Error('Revocation unconfirmed');
     } catch {
-      setError('serviceUnavailable');
+      if (current === generation.current) setError('revocationUnconfirmed');
     } finally {
+      if (current === generation.current) {
+        broadcast();
+        router.replace('/login');
+      }
       setBusy(false);
     }
   };
