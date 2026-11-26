@@ -22,7 +22,7 @@ function deferred() {
 
 function harness() {
   let issue = 0;
-  const upstream = { revoke: async () => true, refresh: async () => undefined };
+  const upstream = { revoke: async () => true, refresh: async () => undefined, upload: async () => new Response(null, { status: 201 }) };
   const calls = { logout: [], refresh: [] };
   const revoked = new Set();
   const families = new Map();
@@ -54,6 +54,7 @@ function harness() {
     }
     if (!family || revoked.has(family)) return new Response(null, { status: 401 });
     if (route === 'auth/switch-school') return Response.json(issuePair(family));
+    if (route === 'files') return upstream.upload();
     if (route === 'me') return Response.json({ family });
     throw new Error('Unexpected fictional upstream route');
   }
@@ -81,6 +82,36 @@ async function login(handler, jar) {
   apply(jar, response);
   return { response, slot: jar.get(sessionSelector) };
 }
+
+test('bounds authenticated upload forwarding and releases capacity after upstream failure', async () => {
+  const h = harness();
+  const jar = new Map();
+  await login(h.handler, jar);
+  const started = deferred(), complete = deferred();
+  let inFlight = 0;
+  h.upstream.upload = async () => {
+    if (++inFlight === 4) started.resolve();
+    await complete.promise;
+    throw new Error('Fictional upstream interruption');
+  };
+  const pending = Array.from({ length: 4 }, () => send(h.handler, jar, 'files', 'POST'));
+  try {
+    await started.promise;
+    const busy = await send(h.handler, jar, 'files', 'POST');
+    assert.equal(busy.status, 503);
+    assert.equal(busy.headers.get('retry-after'), '1');
+    assert.equal(inFlight, 4);
+    assert.equal((await send(h.handler, jar, 'me')).status, 200);
+  } finally {
+    complete.resolve();
+    assert.deepEqual((await Promise.all(pending)).map(response => response.status), [503, 503, 503, 503]);
+  }
+  h.upstream.upload = async () => new Response(null, { status: 503, headers: { 'Retry-After': '2' } });
+  const busyUpstream = await send(h.handler, jar, 'files', 'POST');
+  assert.equal(busyUpstream.headers.get('retry-after'), '2');
+  h.upstream.upload = async () => new Response(null, { status: 201 });
+  assert.equal((await send(h.handler, jar, 'files', 'POST')).status, 201);
+});
 function assertCleared(response, slot) {
   for (const name of [accessCookie(slot), refreshCookie(slot)]) {
     const cookie = response.cookies.get(name);

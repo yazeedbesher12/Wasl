@@ -1,3 +1,5 @@
+import { isIP } from 'node:net';
+
 export function validateEnvironment(env: Record<string, unknown>) {
   if (env.NODE_ENV !== undefined && !['development', 'test', 'production'].includes(String(env.NODE_ENV))) throw new Error('NODE_ENV must be development, test or production');
   const production = env.NODE_ENV === 'production';
@@ -39,6 +41,8 @@ export function validateEnvironment(env: Record<string, unknown>) {
     if (password.length < 12 || Buffer.byteLength(password, 'utf8') > 72) throw new Error('Set WASL_DEV_PASSWORD to a development-only password of 12..72 UTF-8 bytes');
   }
   const origins = String(env.CORS_ORIGINS ?? (production ? '' : 'http://localhost:3000')).split(',').map(s => s.trim()).filter(Boolean);
+  const trustedProxies = String(env.WASL_TRUSTED_PROXY_IPS ?? '').split(',').map(s => s.trim()).filter(Boolean);
+  if (trustedProxies.some(ip => !isIP(ip) || ip.includes('%'))) throw new Error('WASL_TRUSTED_PROXY_IPS must contain literal IP addresses');
   if (!origins.length) throw new Error('Set explicit CORS_ORIGINS');
   for (const origin of origins) {
     try { const url = new URL(origin); if (!['http:', 'https:', 'exp:'].includes(url.protocol) || url.origin !== origin && url.protocol !== 'exp:' || url.username || url.password || origin.includes('*')) throw new Error(); }
@@ -56,5 +60,5 @@ export function validateEnvironment(env: Record<string, unknown>) {
     }
     if (env.S3_FORCE_PATH_STYLE !== undefined && !['true', 'false'].includes(String(env.S3_FORCE_PATH_STYLE))) throw new Error('S3_FORCE_PATH_STYLE must be true or false');
   }
-  return { ...env, WASL_FILE_STORAGE_DRIVER: fileDriver, WASL_STORAGE_DRIVER: driver, JWT_ACCESS_SECONDS: seconds, JWT_REFRESH_TTL_DAYS: days, CORS_ORIGINS: origins.join(',') };
+  return { ...env, WASL_FILE_STORAGE_DRIVER: fileDriver, WASL_STORAGE_DRIVER: driver, JWT_ACCESS_SECONDS: seconds, JWT_REFRESH_TTL_DAYS: days, CORS_ORIGINS: origins.join(','), WASL_TRUSTED_PROXY_IPS: trustedProxies };
 }

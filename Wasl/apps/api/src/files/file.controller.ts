@@ -2,13 +2,19 @@ import { IsOptional, IsString, IsUUID, Length } from 'class-validator';
 import { BadRequestException, Body, Controller, Get, Header, Param, ParseUUIDPipe, Post, Query, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOkResponse, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
+import type { Options } from 'multer';
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/decorators';
 import { FileUploadDto } from '../foundation/communication.dto';
 import { Respond } from '../foundation/responses';
 import { FileService } from './file.service';
 import { MAX_FILE_BYTES } from './object-store';
+import { UploadAdmissionInterceptor } from './upload-admission.interceptor';
 import { FILE_PURPOSES } from '@wasl/shared';
+
+const uploadLimits: Options['limits'] = {
+  fileSize: MAX_FILE_BYTES, files: 1, fields: 3, parts: 4, fieldSize: 1024, fieldNameSize: 64, fieldNestingDepth: 0,
+};
 
 export class FileResponse {
   @ApiProperty({ format: 'uuid' }) id: string;
@@ -40,7 +46,7 @@ export class FileController {
   constructor(private service: FileService) {}
   @Post() @Roles('TEACHER', 'SCHOOL_ADMIN', 'STUDENT') @ApiConsumes('multipart/form-data')
   @ApiBody({ schema: { type: 'object', required: ['file', 'purpose'], properties: { file: { type: 'string', format: 'binary' }, purpose: { type: 'string', enum: [...FILE_PURPOSES] }, lessonId: { type: 'string', format: 'uuid' }, assessmentId: { type: 'string', format: 'uuid' } } } })
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_FILE_BYTES, files: 1, fields: 3, parts: 4, fieldSize: 1024 } }))
+  @UseInterceptors(UploadAdmissionInterceptor, FileInterceptor('file', { limits: uploadLimits }))
   @Respond(FileResponse, false, true)
   upload(@CurrentUser() u: AuthUser, @Body() dto: FileUploadDto, @UploadedFile() file?: Express.Multer.File) { return this.service.upload(u, dto, file); }
   @Get('resolve') @Respond(FileResponse) resolve(@CurrentUser() u: AuthUser, @Query() q: ResolveFileQuery) { return this.service.resolve(u, q.storageKey, childContext(q)); }

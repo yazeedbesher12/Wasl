@@ -8,6 +8,13 @@ import { DeleteObjectCommand, GetObjectCommand, HeadBucketCommand, PutObjectComm
 
 export const OBJECT_STORE = Symbol('WASL_OBJECT_STORE');
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const WRITE_TIMEOUT_MS = 30_000;
+export class ObjectKeyConflict extends ServiceUnavailableException {
+  constructor() { super('Could not store file'); }
+}
+export class ObjectWriteUncertain extends ServiceUnavailableException {
+  constructor() { super('Could not store file'); }
+}
 export interface ObjectStore {
   readonly driver: 'local' | 's3';
   ready(): Promise<void>;
@@ -27,7 +34,10 @@ export class LocalObjectStore implements ObjectStore {
   async put(key: string, data: Buffer) {
     const path = this.path(key);
     try { await mkdir(dirname(path), { recursive: true, mode: 0o700 }); await writeFile(path, data, { flag: 'wx', mode: 0o600 }); }
-    catch { throw new ServiceUnavailableException('Could not store file'); }
+    catch (error) {
+      if (code(error) === 'EEXIST') throw new ObjectKeyConflict();
+      throw new ServiceUnavailableException('Could not store file');
+    }
   }
   async get(key: string) {
     try { const path = this.path(key); const info = await stat(path); if (!info.isFile() || info.size > MAX_FILE_BYTES) throw new ServiceUnavailableException('Stored object exceeds the file limit'); return await readFile(path); }
@@ -41,8 +51,14 @@ export class S3ObjectStore implements ObjectStore {
   async ready() { await this.client.send(new HeadBucketCommand({ Bucket: this.bucket })); }
   async put(key: string, data: Buffer, contentType: string) {
     safeKey(key);
-    try { await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: data, ContentType: contentType, ContentLength: data.length, IfNoneMatch: '*' })); }
-    catch { throw new ServiceUnavailableException('Could not store file'); }
+    try {
+      await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: data, ContentType: contentType, ContentLength: data.length, IfNoneMatch: '*' }),
+        { abortSignal: AbortSignal.timeout(WRITE_TIMEOUT_MS) });
+    } catch (error) {
+      if (error instanceof Error && (error.name === 'PreconditionFailed' || error.name === 'ConditionalRequestConflict'))
+        throw new ObjectKeyConflict();
+      throw new ObjectWriteUncertain();
+    }
   }
   async get(key: string) {
     safeKey(key);
@@ -62,7 +78,11 @@ export class S3ObjectStore implements ObjectStore {
       throw new ServiceUnavailableException('File storage is unavailable');
     }
   }
-  async remove(key: string) { safeKey(key); await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key })); }
+  async remove(key: string) {
+    safeKey(key);
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
+      { abortSignal: AbortSignal.timeout(WRITE_TIMEOUT_MS) });
+  }
   onModuleDestroy() { this.client.destroy(); }
 }
 export async function openObjectStore(config: ConfigService): Promise<ObjectStore> {

@@ -1,14 +1,22 @@
 import type { INestApplication } from '@nestjs/common';
-import { ServiceUnavailableException } from '@nestjs/common';
+import { Logger, ServiceUnavailableException } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { randomUUID } from 'node:crypto';
+import { request as httpRequest } from 'node:http';
+import { finalize } from 'rxjs';
 import request from 'supertest';
 import { WaslClient } from '@wasl/shared';
 import { STORAGE, type FoundationStorage } from '../src/foundation/repositories';
-import { MAX_FILE_BYTES, OBJECT_STORE, type ObjectStore } from '../src/files/object-store';
+import { MAX_FILE_BYTES, OBJECT_STORE, ObjectWriteUncertain, type ObjectStore } from '../src/files/object-store';
+import { UploadAdmissionInterceptor } from '../src/files/upload-admission.interceptor';
 import { bearer, createMemoryApp, developmentId as id, login, TEST_PASSWORD, TEST_PDF, uploadTestFile } from './memory-harness';
 
 type Actor = 'teacher' | 'student' | 'parent' | 'admin' | 'otherTeacher' | 'otherStudent' | 'otherAdmin' | 'peerTeacher' | 'peerStudent' | 'platform';
+function signal() {
+  let notify!: () => void;
+  const pending = new Promise<void>(resolve => { notify = resolve; });
+  return { pending, notify };
+}
 describe('Private files, announcements and notifications API', () => {
   let app: INestApplication;
   let objects: ObjectStore;
@@ -180,8 +188,88 @@ describe('Private files, announcements and notifications API', () => {
     expect((await upload('teacher', 'LESSON_RESOURCE', l)).status).toBe(503);
     expect(key).not.toBe(''); await expect(objects.get(key)).rejects.toThrow();
     jest.restoreAllMocks();
-    jest.spyOn(objects, 'put').mockRejectedValue(new ServiceUnavailableException('Test storage outage'));
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(objects, 'put').mockImplementation(async (path, data, mime) => {
+      key = path;
+      await put(path, data, mime);
+      throw new ObjectWriteUncertain();
+    });
     expect((await upload('teacher', 'LESSON_RESOURCE', l)).status).toBe(503);
+    await expect(objects.get(key)).rejects.toThrow('File not found');
+    expect((await call('teacher', 'get', '/files/resolve?storageKey=' + encodeURIComponent(key))).status).toBe(404);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^Upload outcome needs reconciliation \(fileId=[a-f0-9-]{36}\)$/));
+  });
+
+  it('keeps a possibly committed object and reports a safe reconciliation identifier', async () => {
+    const l = await lesson();
+    const storage = app.get<FoundationStorage>(STORAGE);
+    const run = storage.run.bind(storage);
+    const put = objects.put.bind(objects);
+    let transactions = 0;
+    let key = '';
+    jest.spyOn(storage, 'run').mockImplementation(async (scope, work) => {
+      const result = await run(scope, work);
+      if (scope.kind === 'school' && ++transactions === 2)
+        throw new ServiceUnavailableException('Test lost commit acknowledgement');
+      return result;
+    });
+    jest.spyOn(objects, 'put').mockImplementation(async (path, data, mime) => {
+      key = path;
+      await put(path, data, mime);
+    });
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    expect((await upload('teacher', 'LESSON_RESOURCE', l)).status).toBe(503);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^Upload outcome needs reconciliation \(fileId=[a-f0-9-]{36}\)$/));
+    const resolved = await call('teacher', 'get', '/files/resolve?storageKey=' + encodeURIComponent(key));
+    expect(resolved.status).toBe(200);
+    expect((await call('teacher', 'get', `/files/${resolved.body.id}/content`)).body).toEqual(TEST_PDF);
+    expect((await call('otherTeacher', 'get', `/files/${resolved.body.id}/content`)).status).toBe(404);
+  });
+
+  it('bounds in-flight uploads before multipart parsing and releases the slot after disconnect', async () => {
+    const l = await lesson();
+    const entered = signal(), parsed = signal(), released = signal(), stored = signal(), continueWrite = signal();
+    const intercept = UploadAdmissionInterceptor.prototype.intercept;
+    jest.spyOn(UploadAdmissionInterceptor.prototype, 'intercept').mockImplementation(function (this: UploadAdmissionInterceptor, context, next) {
+      const req = context.switchToHttp().getRequest();
+      if (!req.headers['x-fictional-upload-probe']) return intercept.call(this, context, next);
+      return intercept.call(this, context, { handle: () => {
+        req.once('data', parsed.notify);
+        entered.notify();
+        return next.handle();
+      } }).pipe(finalize(released.notify));
+    });
+    const put = objects.put.bind(objects);
+    jest.spyOn(objects, 'put').mockImplementationOnce(async (key, data, mime) => {
+      stored.notify();
+      await continueWrite.pending;
+      return put(key, data, mime);
+    });
+    const hold = upload('teacher', 'LESSON_RESOURCE', l).then(response => response);
+    const { port } = app.getHttpServer().address() as { port: number };
+    const boundary = 'fictional-upload-boundary';
+    const client = httpRequest({ hostname: '127.0.0.1', port, method: 'POST', path: '/api/v1/files',
+      headers: { Authorization: tokens.teacher, 'Content-Type': 'multipart/form-data; boundary=' + boundary,
+        'X-Fictional-Upload-Probe': '1' } });
+    client.on('error', () => undefined);
+    client.flushHeaders();
+    try {
+      await Promise.all([stored.pending, entered.pending]);
+      client.write(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="worksheet.pdf"\r\nContent-Type: application/pdf\r\n\r\n`);
+      client.write(TEST_PDF);
+      await parsed.pending;
+      const busy = await upload('teacher', 'LESSON_RESOURCE', l);
+      expect(busy.status).toBe(503);
+      expect(busy.headers['retry-after']).toBe('1');
+      expect((await upload('otherTeacher', 'LESSON_RESOURCE', id(509))).status).toBe(201);
+      client.destroy();
+      await released.pending;
+      expect((await upload('teacher', 'LESSON_RESOURCE', l)).status).toBe(201);
+    } finally {
+      client.destroy();
+      continueWrite.notify();
+      expect((await hold).status).toBe(201);
+    }
   });
 
   it('rechecks target lifecycle after object upload and removes the newly written orphan', async () => {

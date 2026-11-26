@@ -29,6 +29,7 @@ function setTokens(response: NextResponse, pair: TokenPair, slot: string) {
 }
 export function createWaslProxy(state: SessionState, fetchUpstream: typeof fetch = fetch) {
   const { sessions, refreshing } = state;
+  let uploadsInFlight = 0;
   const active = (slot: string) => (sessions.get(slot)?.expires ?? 0) > Date.now();
   const refreshKey = (slot: string, token: string) => slot + ':' + hash(token);
 
@@ -122,9 +123,15 @@ export function createWaslProxy(state: SessionState, fetchUpstream: typeof fetch
     }
     if (route !== 'auth/login' && (!active(slot) || (!token && !refresh)))
       return clearSlot(NextResponse.json({ message: 'Sign in required' }, { status: 401, headers: noStore }), slot);
+    const upload = method === 'POST' && route === 'files';
+    if (upload && uploadsInFlight >= 4)
+      return NextResponse.json({ code: 'SERVICE_UNAVAILABLE', message: 'Uploads are busy. Try again later.' }, {
+        status: 503, headers: { ...noStore, 'Retry-After': '1' },
+      });
+    if (upload) uploadsInFlight++;
     try {
       const declared = Number(request.headers.get('content-length') ?? 0);
-      const limit = 11 * 1024 * 1024;
+      const limit = upload ? 10 * 1024 * 1024 + 64 * 1024 : 11 * 1024 * 1024;
       if (declared > limit)
         return NextResponse.json({ message: 'File is too large' }, { status: 413 });
       let body: ArrayBuffer | undefined;
@@ -132,17 +139,28 @@ export function createWaslProxy(state: SessionState, fetchUpstream: typeof fetch
         const chunks: Uint8Array[] = [];
         let size = 0;
         const reader = request.body?.getReader();
-        if (reader)
-          while (true) {
-            const item = await reader.read();
-            if (item.done) break;
-            size += item.value.byteLength;
-            if (size > limit) {
-              await reader.cancel();
-              return NextResponse.json({ message: 'File is too large' }, { status: 413 });
+        if (reader) {
+          const deadline = upload ? AbortSignal.timeout(60_000) : undefined;
+          const cancel = () => { void reader.cancel().catch(() => undefined); };
+          deadline?.addEventListener('abort', cancel, { once: true });
+          try {
+            while (true) {
+              const item = await reader.read();
+              if (deadline?.aborted)
+                return NextResponse.json({ message: 'Upload timed out' }, { status: 408, headers: noStore });
+              if (item.done) break;
+              size += item.value.byteLength;
+              if (size > limit) {
+                await reader.cancel();
+                return NextResponse.json({ message: 'File is too large' }, { status: 413 });
+              }
+              chunks.push(item.value);
             }
-            chunks.push(item.value);
+          } finally {
+            deadline?.removeEventListener('abort', cancel);
+            reader.releaseLock();
           }
+        }
         if (size) {
           const bytes = new Uint8Array(size);
           let offset = 0;
@@ -204,7 +222,7 @@ export function createWaslProxy(state: SessionState, fetchUpstream: typeof fetch
         return response;
       }
       const headers = new Headers({ 'Cache-Control': 'private, no-store' });
-      for (const name of ['content-type', 'content-disposition', 'x-content-type-options']) {
+      for (const name of ['content-type', 'content-disposition', 'x-content-type-options', 'retry-after']) {
         const value = result.headers.get(name);
         if (value) headers.set(name, value);
       }
@@ -220,6 +238,8 @@ export function createWaslProxy(state: SessionState, fetchUpstream: typeof fetch
         { code: 'SERVICE_UNAVAILABLE', message: 'Service is unavailable. Please retry.' },
         { status: 503, headers: { 'Cache-Control': 'no-store' } },
       );
+    } finally {
+      if (upload) uploadsInFlight--;
     }
   }
   return handle;
