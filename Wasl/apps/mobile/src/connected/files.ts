@@ -10,6 +10,7 @@ export async function upload(
   purpose: 'LESSON_RESOURCE' | 'ASSESSMENT_ANSWER',
   ownerId: string,
 ): Promise<FileDto | undefined> {
+  const epoch = api.epoch;
   const picked = await DocumentPicker.getDocumentAsync({
     multiple: false,
     copyToCacheDirectory: true,
@@ -24,6 +25,7 @@ export async function upload(
     ],
   });
   if (picked.canceled) return;
+  api.assertCurrent(epoch);
   const asset = picked.assets[0];
   if (asset.size && asset.size > 10 * 1024 * 1024)
     throw Object.assign(new Error('File too large'), { status: 413 });
@@ -37,15 +39,22 @@ export async function upload(
       name: asset.name,
       type: asset.mimeType ?? 'application/octet-stream',
     } as unknown as Blob);
-  return (await api.response('files', { method: 'POST', body: data })).json() as Promise<FileDto>;
+  const response = await api.response('files', { method: 'POST', body: data }, epoch);
+  const uploaded = (await response.json()) as FileDto;
+  api.assertCurrent(epoch);
+  return uploaded;
 }
 export async function download(api: NativeApi, storageKey: string) {
+  const epoch = api.epoch;
   const metadata = await api.call<FileDto>(
     'files/resolve?storageKey=' + encodeURIComponent(storageKey),
+    'GET', undefined, epoch,
   );
-  const response = await api.response('files/' + metadata.id + '/content');
+  const response = await api.response('files/' + metadata.id + '/content', {}, epoch);
   if (Platform.OS === 'web') {
-    const url = URL.createObjectURL(await response.blob());
+    const blob = await response.blob();
+    api.assertCurrent(epoch);
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
     link.download = metadata.originalName;
@@ -55,14 +64,14 @@ export async function download(api: NativeApi, storageKey: string) {
   }
   const safeName =
     metadata.id + '-' + metadata.originalName.replace(/[^\p{L}\p{N}._-]/gu, '_').slice(-100);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  api.assertCurrent(epoch);
   const file = new File(Paths.cache, safeName);
   file.create({ overwrite: true });
-  await file.write(new Uint8Array(await response.arrayBuffer()));
-  if (!(await Sharing.isAvailableAsync())) {
-    file.delete();
-    throw new Error('Sharing unavailable');
-  }
   try {
+    await file.write(bytes);
+    if (!(await Sharing.isAvailableAsync())) throw new Error('Sharing unavailable');
+    api.assertCurrent(epoch);
     await Sharing.shareAsync(file.uri, {
       mimeType: metadata.contentType,
       dialogTitle: metadata.originalName,

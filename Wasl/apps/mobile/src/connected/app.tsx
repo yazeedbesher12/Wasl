@@ -517,15 +517,12 @@ function Profile() {
       <Button
         onPress={() =>
           void n.run(
-            () => n.api.call('me/profile', 'PATCH', { fullName: name }),
-            () => {
-              void n.api
-                .call<MeDto>('me')
-                .then(n.setUser)
-                .catch(() =>
-                  n.setError(n.ar ? 'تعذر تحديث الحساب.' : 'Could not refresh account.'),
-                );
+            async () => {
+              const epoch = n.api.epoch;
+              await n.api.call('me/profile', 'PATCH', { fullName: name }, epoch);
+              return n.api.call<MeDto>('me', 'GET', undefined, epoch);
             },
+            n.setUser,
           )
         }
       >
