@@ -59,7 +59,8 @@ test('Subjects proofs bind SQL authority to a verified operation and transaction
     const second = await foundation.saveAcademic(admin, 'subjects', { nameAr: 'Fictional', nameEn: `${name} unassigned` });
     return { school, admin, first, second };
   }
-  const [a, b] = await Promise.all([fixtures('Subjects Alpha'), fixtures('Subjects Beta')]);
+  const a = await fixtures('Subjects Alpha');
+  const b = await fixtures('Subjects Beta');
   async function proof(tx, who, schoolId, { operation = 'read', subjectId = null, child = null, expires = Date.now() + 15000 } = {}) {
     const [binding] = await tx.$queryRaw`SELECT oid::text AS database, pg_backend_pid()::text AS backend,
       pg_current_xact_id()::text AS transaction, session_user::text AS login FROM pg_catalog.pg_database WHERE datname = current_database()`;
@@ -102,6 +103,9 @@ test('Subjects proofs bind SQL authority to a verified operation and transaction
   });
 
   await t.test('concurrent connections, rollback and pool reuse cannot replay captured proof', async () => {
+    const a = await fixtures('Subjects Replay Home');
+    const b = await fixtures('Subjects Replay Partner');
+    await foundation.saveAcademic(a.admin, 'subjects', { nameEn: 'Verified new name' }, a.first.id);
     const rolledBack = new Error('Fictional rollback');
     let captured;
     await assert.rejects(db.$transaction(async tx => {
@@ -171,7 +175,8 @@ test('Subjects proofs bind SQL authority to a verified operation and transaction
       await foundation.linkStatus(admin, link.id, 'VERIFIED');
       return { teacher, student };
     }
-    const [alpha, beta] = await Promise.all([enroll(a), enroll(b)]);
+    const alpha = await enroll(a);
+    const beta = await enroll(b);
     for (const [fixture, people] of [[a, alpha], [b, beta]]) {
       for (const reader of [people.teacher, people.student]) {
         assert.equal((await foundation.getAcademic(reader, 'subjects', fixture.first.id)).id, fixture.first.id);

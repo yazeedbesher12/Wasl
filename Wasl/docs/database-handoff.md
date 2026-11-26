@@ -286,6 +286,26 @@ Legacy caller-controlled school, user and bypass settings do not appear in any
 active public-table policy. Before rollout, validate school references in
 existing data and rehearse with the deployment role and pooler configuration.
 
+Migration `202611260010_assessment_integrity` checks grading at transaction
+commit, after the API has saved both the submission and answer marks. Release
+rechecks each final submission against the assessment's questions, score
+bounds and rounded total. Abandoned drafts remain outside the release check.
+Assessment write policies enforce the existing lifecycle, including deadlines
+that make an open or scheduled row effectively closed. Restricted workflow
+writes use Serializable transactions. A parent whose access is revoked may
+still see the prior relationship in an already established Serializable
+snapshot. A new transaction checks the updated link and membership.
+
+Before applying this migration to an existing database, review historic grades
+and retain a tested backup. The migration preserves existing rows. An older
+inconsistent grade must be corrected before a new release can succeed.
+
+School administrators can infer that an email belongs to a global account
+through the existing user-creation and membership-linking flows. Changing that
+behavior requires a product decision on whether administrators should be able
+to attach existing accounts without an invitation or the account holder's
+confirmation. The existing provisioning contract is retained.
+
 DB-01 is closed for the current Release 1 catalog and the five runtime roles.
 PostgreSQL 17 regression probes using the real assessment-staff and
 academic-admin logins now reject both a foreign teacher owner/assignment and an

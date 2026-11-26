@@ -102,8 +102,10 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
     set_config('app.assessment_tag', ${p.tag}, true) IS NOT NULL`;
   async function proof(tx, who, target, operation, options = {}) {
     const [binding] = await tx.$queryRaw`SELECT oid::text AS database, pg_backend_pid() AS pid, pg_current_xact_id()::text AS xid,
-      session_user::text AS login FROM pg_catalog.pg_database WHERE datname = current_database()`;
-    const payload = JSON.stringify([binding.database, binding.pid, binding.xid, binding.login, options.expires ?? Date.now() + 15000,
+      session_user::text AS login, (extract(epoch FROM statement_timestamp()) * 1000)::float8 AS "databaseNow"
+      FROM pg_catalog.pg_database WHERE datname = current_database()`;
+    const expiry = options.expired ? Math.floor(binding.databaseNow) - 1000 : Date.now() + 15000;
+    const payload = JSON.stringify([binding.database, binding.pid, binding.xid, binding.login, expiry,
       options.actor ?? who.sub, who.membershipId, options.school ?? who.schoolId, `assessment:${operation}`, target]);
     return { payload, tag: createHmac('sha256', key).update(payload).digest('hex') };
   }
@@ -189,6 +191,8 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
   });
 
   await t.test('academic reads follow verified assignments, enrollments and parent links', async () => {
+    const a = await fixtures('Fictional Academic Read Home');
+    const b = await fixtures('Fictional Academic Read Partner');
     const read = tx => tx.$queryRaw`SELECT e.id FROM public.enrollments e JOIN public.sections s ON s.id = e.section_id
       JOIN public.grades g ON g.id = s.grade_id JOIN public.academic_years y ON y.id = s.academic_year_id
       JOIN public.semesters sem ON sem.academic_year_id = y.id WHERE sem.id IN (${a.semester.id}::uuid, ${b.semester.id}::uuid) ORDER BY e.id`;
@@ -197,7 +201,7 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
     await db.$transaction(async tx => {
       await tx.$queryRaw`SELECT set_config('app.school_id', ${a.school.id}, true), set_config('app.user_id', ${a.student.sub}, true), set_config('app.bypass_rls', 'on', true)`;
       assert.deepEqual(await read(tx), []);
-      await install(tx, await proof(tx, a.student, a.student.sub, 'read', { expires: Date.now() - 5000 }));
+      await install(tx, await proof(tx, a.student, a.student.sub, 'read', { expired: true }));
       assert.deepEqual(await read(tx), []);
       const valid = await proof(tx, a.student, a.student.sub, 'read');
       await install(tx, valid);
@@ -367,10 +371,14 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
   });
 
   await t.test('learner rows require verified school, participant and publication scope', async () => {
+    const a = await fixtures('Fictional Learner Read Home');
+    const b = await fixtures('Fictional Learner Read Partner');
     const draftFor = (fixture, student) => grading.save(student, fixture.assessment.id, {
       answers: [{ questionId: fixture.short.id, text: 'Fictional private response' }],
     }, false);
-    const [own, peer, foreign] = await Promise.all([draftFor(a, a.student), draftFor(a, a.peer), draftFor(b, b.student)]);
+    const own = await draftFor(a, a.student);
+    const peer = await draftFor(a, a.peer);
+    const foreign = await draftFor(b, b.student);
     const scheduled = await grading.create(a.teacher, { sectionSubjectId: a.assignment.id, type: 'ASSIGNMENT', title: 'Fictional Scheduled',
       opensAt: new Date(Date.now() + 3600000).toISOString() });
     const laterBank = await learning.createQuestionBank(a.teacher, { subjectId: (await foundation.getAcademic(a.admin, 'sectionSubjects', a.assignment.id)).subjectId,
@@ -394,7 +402,7 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
       await tx.$queryRaw`SELECT set_config('app.school_id', ${a.school.id}, true), set_config('app.user_id', ${a.student.sub}, true), set_config('app.bypass_rls', 'on', true)`;
       assert.deepEqual(await read(tx), []);
       const bound = await proof(tx, a.student, a.assessment.id, 'draft');
-      for (const invalid of [{ ...bound, tag: '0'.repeat(64) }, await proof(tx, a.student, a.assessment.id, 'draft', { expires: Date.now() - 5000 }),
+      for (const invalid of [{ ...bound, tag: '0'.repeat(64) }, await proof(tx, a.student, a.assessment.id, 'draft', { expired: true }),
         await proof(tx, a.student, a.assessment.id, 'draft', { school: b.school.id }), await proof(tx, a.student, a.assessment.id, 'draft', { actor: a.peer.sub })]) {
         await install(tx, invalid);
         assert.deepEqual(await read(tx), []);
@@ -496,7 +504,7 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
       await install(tx, await proof(tx, a.student, a.assessment.id, 'draft'));
       assert.equal(await tx.$executeRaw`DELETE FROM public.answers WHERE submission_id = ${draft.id}::uuid`, 2);
       throw rollback;
-    }), e => e === rollback);
+    }, { isolationLevel: 'Serializable' }), e => e === rollback);
     assert.equal((await grading.ownSubmission(a.student, a.assessment.id)).answers.length, 2);
     assert.equal((await grading.save(a.student, a.assessment.id, request, true)).status, 'SUBMITTED');
     await grading.transition(a.teacher, a.assessment.id, 'close');
@@ -533,7 +541,7 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
       assert.deepEqual(await readGrade(tx, draft.id), []);
       const valid = await proof(tx, a.student, a.student.sub, 'results');
       captured = valid;
-      for (const forged of [{ ...valid, tag: '0'.repeat(64) }, await proof(tx, a.student, a.student.sub, 'results', { expires: Date.now() - 500 }),
+      for (const forged of [{ ...valid, tag: '0'.repeat(64) }, await proof(tx, a.student, a.student.sub, 'results', { expired: true }),
         await proof(tx, a.student, a.student.sub, 'results', { actor: b.student.sub }), await proof(tx, a.student, a.student.sub, 'results', { school: b.school.id }),
         await proof(tx, b.student, a.student.sub, 'results')]) {
         await install(tx, forged);
@@ -553,6 +561,16 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
   });
 
   await t.test('released parent reads are bound to one verified child and stop after revocation', async () => {
+    const a = await fixtures('Fictional Parent Release');
+    const submitted = await grading.save(a.student, a.assessment.id, { answers: [
+      { questionId: a.choice.id, optionId: a.choice.options[0].id },
+      { questionId: a.short.id, text: 'Fictional reply' },
+    ] }, true);
+    await grading.transition(a.teacher, a.assessment.id, 'close');
+    await grading.grade(a.teacher, submitted.id, { answers: [
+      { questionId: a.choice.id, score: 3 }, { questionId: a.short.id, score: 1 },
+    ] });
+    await grading.transition(a.teacher, a.assessment.id, 'release');
     const released = await grading.ownSubmission(a.student, a.assessment.id);
     const read = tx => tx.$queryRaw`SELECT ans.id FROM public.answers ans WHERE ans.submission_id = ${released.id}::uuid`;
     await db.$transaction(async tx => {
@@ -574,7 +592,84 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
     await assert.rejects(grading.childResults(a.parent, a.student.sub, page), notFound);
   });
 
+  await t.test('release waits for all final submissions in an independently prepared assessment', async () => {
+    const f = await fixtures('Fictional Mixed Grades');
+    const request = { answers: [
+      { questionId: f.choice.id, optionId: f.choice.options[0].id },
+      { questionId: f.short.id, text: 'Fictional reply' },
+    ] };
+    const first = await grading.save(f.student, f.assessment.id, request, true);
+    const second = await grading.save(f.peer, f.assessment.id, request, true);
+    await grading.transition(f.teacher, f.assessment.id, 'close');
+    const marks = { answers: [
+      { questionId: f.choice.id, score: 3 },
+      { questionId: f.short.id, score: 1 },
+    ] };
+    const staff = clients.assessmentStaff;
+    const serializable = { isolationLevel: 'Serializable' };
+    const gradeRow = (tx, total) => tx.$executeRaw`
+      UPDATE public.submissions SET status = 'GRADED', score = ${String(total)}::text::float8, graded_at = CURRENT_TIMESTAMP
+      WHERE id = ${first.id}::uuid`;
+    for (const scenario of [
+      { scores: [3], total: 3 },
+      { scores: [4, 1], total: 5 },
+      { scores: [3, 1], total: 5 },
+      { scores: [3, 1], total: Infinity },
+      { scores: [3, 1], total: NaN },
+    ]) {
+      await assert.rejects(staff.$transaction(async tx => {
+        await install(tx, await proof(tx, f.teacher, first.id, 'staff-grade'));
+        for (const [i, score] of scenario.scores.entries()) {
+          const questionId = marks.answers[i].questionId;
+          assert.equal(await tx.$executeRaw`UPDATE public.answers SET score = ${score}::float8
+            WHERE submission_id = ${first.id}::uuid AND question_id = ${questionId}::uuid`, 1);
+        }
+        assert.equal(await gradeRow(tx, scenario.total), 1);
+        await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+      }, serializable), error => error.meta?.code === '23514');
+      assert.equal((await grading.submission(f.teacher, first.id)).status, 'SUBMITTED');
+    }
+    await grading.grade(f.teacher, first.id, marks);
+    assert.equal((await grading.get(f.teacher, f.assessment.id)).status, 'GRADING');
+    const releaseRow = tx => tx.$executeRaw`
+      UPDATE public.assessments SET status = 'RESULTS_RELEASED', results_released_at = CURRENT_TIMESTAMP
+      WHERE id = ${f.assessment.id}::uuid`;
+    await assert.rejects(staff.$transaction(async tx => {
+      await install(tx, await proof(tx, f.teacher, f.assessment.id, 'staff-release'));
+      await releaseRow(tx);
+    }, serializable), denied);
+    await assert.rejects(grading.transition(f.teacher, f.assessment.id, 'release'), error => error.getStatus?.() === 409);
+    assert.equal((await grading.ownSubmission(f.student, f.assessment.id)).score, null);
+    await staff.$transaction(async tx => {
+      await install(tx, await proof(tx, f.teacher, randomUUID(), 'staff-release'));
+      assert.equal(await releaseRow(tx), 0);
+    }, serializable);
+    for (const change of [
+      tx => tx.$executeRaw`UPDATE public.assessments SET status = 'DRAFT' WHERE id = ${f.assessment.id}::uuid`,
+      tx => tx.$executeRaw`UPDATE public.assessments SET title = 'Invalid lifecycle edit' WHERE id = ${f.assessment.id}::uuid`,
+    ]) {
+      await assert.rejects(staff.$transaction(async tx => {
+        await install(tx, await proof(tx, f.teacher, f.teacher.sub, 'staff-write'));
+        await change(tx);
+      }, serializable), denied);
+    }
+    const [lastGrade, release] = await Promise.allSettled([
+      grading.grade(f.teacher, second.id, marks), grading.transition(f.teacher, f.assessment.id, 'release'),
+    ]);
+    assert.equal(lastGrade.status, 'fulfilled', String(lastGrade.reason ?? ''));
+    if (release.status === 'rejected') {
+      assert.equal(release.reason.getStatus?.(), 409);
+      assert.equal((await grading.transition(f.teacher, f.assessment.id, 'release')).status, 'RESULTS_RELEASED');
+    } else {
+      assert.equal(release.value.status, 'RESULTS_RELEASED');
+    }
+    assert.equal((await grading.ownSubmission(f.student, f.assessment.id)).score, 4);
+    assert.equal((await grading.ownSubmission(f.peer, f.assessment.id)).score, 4);
+  });
+
   await t.test('school metadata and linked child profiles stay scoped across schools and revocation', async () => {
+    const a = await fixtures('Fictional Directory Home');
+    const b = await fixtures('Fictional Directory Partner');
     const schools = tx => tx.$queryRaw`SELECT id FROM public.schools ORDER BY id`;
     const names = tx => tx.$queryRaw`SELECT id FROM public.users ORDER BY id`;
     assert.deepEqual(await schools(db), []);
@@ -590,7 +685,7 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
       assert.deepEqual(await schools(tx), []);
       const valid = await proof(tx, a.parent, b.student.sub, 'read', { school: b.school.id });
       captured = valid;
-      for (const invalid of [{ ...valid, tag: '0'.repeat(64) }, await proof(tx, a.parent, b.student.sub, 'read', { school: b.school.id, expires: Date.now() - 5000 }),
+      for (const invalid of [{ ...valid, tag: '0'.repeat(64) }, await proof(tx, a.parent, b.student.sub, 'read', { school: b.school.id, expired: true }),
         await proof(tx, a.parent, b.student.sub, 'read', { school: b.school.id, actor: b.parent.sub })]) {
         await install(tx, invalid);
         assert.deepEqual(await names(tx), []);
@@ -623,7 +718,14 @@ test('assessment keys and grades have a database-enforced boundary', async t => 
       assert.deepEqual(await schools(tx), []);
     });
 
-    await foundation.linkStatus(b.admin, newLink.id, 'REJECTED');
+    // Revocation is visible in new transactions. A transaction that has
+    // already taken a Serializable snapshot keeps that snapshot.
+    await db.$transaction(async tx => {
+      await install(tx, await proof(tx, a.parent, b.student.sub, 'read', { school: b.school.id }));
+      assert.deepEqual((await schools(tx)).map(row => row.id), [a.school.id, b.school.id].sort());
+      await foundation.linkStatus(b.admin, newLink.id, 'REJECTED');
+      assert.deepEqual((await schools(tx)).map(row => row.id), [a.school.id, b.school.id].sort());
+    }, { isolationLevel: 'Serializable' });
     await db.$transaction(async tx => {
       await install(tx, await proof(tx, a.parent, b.student.sub, 'read', { school: b.school.id }));
       assert.deepEqual(await names(tx), [{ id: a.parent.sub }]);
