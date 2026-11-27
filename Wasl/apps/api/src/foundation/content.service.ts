@@ -16,9 +16,10 @@ const notFound = () => new NotFoundException('Record not found');
 export class ContentService {
   constructor(@Inject(STORAGE) private storage: FoundationStorage) {}
 
-  private school<T>(actor: AuthUser, work: (repositories: Repositories) => Promise<T>) {
+  private school<T>(actor: AuthUser, work: (repositories: Repositories) => Promise<T>, write = false) {
     if (!actor.schoolId) throw new ForbiddenException('An active school role is required');
-    return this.storage.run({ kind: 'school', userId: actor.sub, schoolId: actor.schoolId }, async repositories => {
+    return this.storage.run({ kind: 'school', userId: actor.sub, schoolId: actor.schoolId,
+      assessment: { membershipId: actor.membershipId, operation: write ? 'content-write' : 'read', targetId: actor.sub } }, async repositories => {
       await requireActor(repositories, actor, ['SCHOOL_ADMIN', 'TEACHER', 'STUDENT']);
       return work(repositories);
     });
@@ -75,7 +76,7 @@ export class ContentService {
       await this.writableAssignment(repositories, actor, input.sectionSubjectId);
       const row: Unit = { id: randomUUID(), schoolId: actor.schoolId!, sectionSubjectId: input.sectionSubjectId, title: input.title, order: input.order ?? 0 };
       return unitDto(await repositories.content.createUnit(row));
-    });
+    }, true);
   }
 
   updateUnit(actor: AuthUser, id: string, input: UpdateUnitDto): Promise<UnitDto> {
@@ -84,7 +85,7 @@ export class ContentService {
       if (!old) throw notFound();
       await this.writableAssignment(repositories, actor, old.sectionSubjectId);
       return unitDto(await repositories.content.updateUnit({ ...old, title: input.title ?? old.title, order: input.order ?? old.order }));
-    });
+    }, true);
   }
 
   private async visibleLessons(repositories: Repositories, actor: AuthUser) {
@@ -115,7 +116,7 @@ export class ContentService {
       await this.writableAssignment(repositories, actor, unit.sectionSubjectId);
       const row: Lesson = { id: randomUUID(), schoolId: actor.schoolId!, unitId: input.unitId, title: input.title, body: input.body ?? null, order: input.order ?? 0, status: 'DRAFT', publishedAt: null };
       return lessonDto(await repositories.content.createLesson(row));
-    });
+    }, true);
   }
 
   updateLesson(actor: AuthUser, id: string, input: UpdateLessonDto): Promise<LessonDto> {
@@ -139,6 +140,6 @@ export class ContentService {
         publishedAt: old.status === 'DRAFT' && status === 'PUBLISHED' ? new Date() : old.publishedAt,
       };
       return lessonDto(await repositories.content.updateLesson(row));
-    });
+    }, true);
   }
 }

@@ -43,7 +43,52 @@ async function ready(url) {
   throw new Error('Server did not become ready: ' + url);
 }
 const testPdf = Buffer.from('%PDF-1.7\nFictional integration document\n%%EOF\n');
+const sessionSelector = 'wasl-session-slot';
+const isCredential = (cookie) => cookie.name.startsWith('wasl.');
+
+function browserJson(page, route, data) {
+  return page.evaluate(async ({ route, data }) => {
+    const response = await fetch('/api/wasl/' + route, data === undefined ? undefined : {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+    });
+    return { status: response.status, body: await response.json() };
+  }, { route, data });
+}
+
+async function openSessionDriver(browser, origin) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  pages.push(page);
+  const url = origin + '/__wasl_session_test__';
+  // The restored parent lessons page can issue its own school switch. This
+  // inert document gives the test one caller while retaining Chromium's
+  // actual origin, Set-Cookie processing and authenticated HTTP requests.
+  await page.route(url, (route) => route.fulfill({
+    contentType: 'text/html',
+    body: '<!doctype html><title>Wasl session test</title>',
+  }));
+  await page.goto(url);
+  return { context, page };
+}
+
+async function selectedSession(context, origin, production) {
+  const cookies = await context.cookies();
+  const selector = cookies.find((cookie) => cookie.name === sessionSelector);
+  assert.ok(selector?.value, 'A session selector was issued');
+  const access = cookies.find((cookie) => cookie.name === 'wasl.access.' + selector.value);
+  const refresh = cookies.find((cookie) => cookie.name === 'wasl.refresh.' + selector.value);
+  assert.ok(access?.value && refresh?.value, 'Both selected credentials were issued');
+  assert.equal(cookies.filter(isCredential).length, 2, 'Only the selected slot has credentials');
+  for (const cookie of [selector, access, refresh]) {
+    assert.ok(cookie.path === '/' && cookie.domain === new URL(origin).hostname &&
+      cookie.httpOnly && cookie.secure === production && cookie.sameSite === 'Lax',
+    'Session cookies have the expected scope and security attributes');
+  }
+  return { slot: selector.value, refreshToken: refresh.value };
+}
+
 async function main() {
+  const production = process.env.WASL_TEST_WEB_PRODUCTION === '1';
   temporary = await mkdtemp(path.join(require('node:os').tmpdir(), 'wasl-web-test-'));
   const apiPort = await port(),
     webPort = await port();
@@ -67,16 +112,19 @@ async function main() {
   );
   start(
     path.join(root, 'node_modules/next/dist/bin/next'),
-    ['dev', '-H', '127.0.0.1', '-p', String(webPort)],
+    [production ? 'start' : 'dev', '-H', '127.0.0.1', '-p', String(webPort)],
     path.join(root, 'apps/web'),
     {
-      NODE_ENV: 'development',
+      NODE_ENV: production ? 'production' : 'development',
       WASL_API_URL: upstream,
       WASL_WEB_ORIGIN: base,
+      WASL_WEB_SESSION_MODE: 'single-instance',
       NEXT_TELEMETRY_DISABLED: '1',
     },
   );
   await Promise.all([ready(upstream + '/health/ready'), ready(base + '/login')]);
+  const anonymous = await fetch(base + '/api/wasl/me');
+  assert.equal(anonymous.status, 401);
   const launch = () =>
     chromium.launch({
       headless: true,
@@ -87,6 +135,84 @@ async function main() {
         (a) => a !== '--disable-web-security',
       ),
     });
+  async function verifyParentSession(checkProcessIsolation) {
+    const browser = await launch();
+    browsers.push(browser);
+    const { context, page } = await openSessionDriver(browser, base);
+    let switches = 0;
+    page.on('request', (r) => {
+      if (r.method() === 'POST' && r.url() === base + '/api/wasl/auth/switch-school') switches++;
+    });
+    const credentials = { email: 'parent@wasl.test', password };
+    assert.equal((await browserJson(page, 'auth/login', credentials)).status, 200);
+    const beforeSwitch = await browserJson(page, 'me');
+    assert.equal(beforeSwitch.status, 200);
+    assert.equal(beforeSwitch.body.activeRole, 'PARENT');
+    assert.equal(beforeSwitch.body.activeSchoolId, id(1));
+    const initial = await selectedSession(context, base, production);
+    const targetSchool = id(2);
+    const switched = await browserJson(page, 'auth/switch-school', { schoolId: targetSchool, role: 'PARENT' });
+    assert.equal(switched.status, 200);
+    assert.ok(switched.body?.ok === true && Object.keys(switched.body).length === 1,
+      'Switch returns the token-free acknowledgement');
+    const afterSwitch = await browserJson(page, 'me');
+    assert.equal(afterSwitch.status, 200);
+    assert.equal(afterSwitch.body.activeSchoolId, targetSchool);
+    const current = await selectedSession(context, base, production);
+    assert.ok(current.slot !== initial.slot, 'Switch replaces the session selector');
+    const signedOut = await browserJson(page, 'auth/logout', {});
+    assert.equal(signedOut.status, 200);
+    assert.equal((await context.cookies()).filter(isCredential).length, 0, 'Logout clears every credential cookie');
+    assert.equal((await browserJson(page, 'me')).status, 401);
+    assert.equal(switches, 1, 'Only the test issues a school switch');
+    for (const { refreshToken } of [initial, current]) {
+      const refresh = await fetch(upstream + '/auth/refresh', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+      assert.equal(refresh.status, 401, 'Logout revokes both ends of the switched family');
+    }
+    console.log('PASS web school switch and logout revoke the original server session');
+    if (!checkProcessIsolation) {
+      await browser.close();
+      return;
+    }
+
+    const secondPort = await port();
+    const secondBase = `http://127.0.0.1:${secondPort}`;
+    const bootSecond = () => start(
+      path.join(root, 'node_modules/next/dist/bin/next'),
+      ['start', '-H', '127.0.0.1', '-p', String(secondPort)],
+      path.join(root, 'apps/web'),
+      { NODE_ENV: 'production', WASL_API_URL: upstream, WASL_WEB_ORIGIN: secondBase,
+        WASL_WEB_SESSION_MODE: 'single-instance', NEXT_TELEMETRY_DISABLED: '1' },
+    );
+    const cookieHeader = (cookies) => cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+    assert.equal((await browserJson(page, 'auth/login', credentials)).status, 200);
+    const primaryCookie = cookieHeader(await context.cookies());
+    const second = bootSecond();
+    await ready(secondBase + '/login');
+    const me = (url, cookie) => fetch(url + '/api/wasl/me', { headers: { Cookie: cookie } });
+    assert.equal((await me(secondBase, primaryCookie)).status, 401);
+    assert.equal((await me(base, primaryCookie)).status, 200);
+    const secondary = await openSessionDriver(browser, secondBase);
+    assert.equal((await browserJson(secondary.page, 'auth/login', credentials)).status, 200);
+    const secondaryCookie = cookieHeader(await secondary.context.cookies());
+    await secondary.context.close();
+    assert.equal((await me(secondBase, secondaryCookie)).status, 200);
+    const stopped = new Promise((resolve) => second.once('exit', resolve));
+    second.kill('SIGTERM');
+    await stopped;
+    bootSecond();
+    await ready(secondBase + '/login');
+    assert.equal((await me(secondBase, secondaryCookie)).status, 401);
+    console.log('PASS isolated production instances and restart reject sessions from a different process');
+    await browser.close();
+  }
+  if (process.argv.includes('--parent-session-only')) {
+    await verifyParentSession(false);
+    return;
+  }
   let active;
   async function pause() {
     if (!active) return;
@@ -130,10 +256,12 @@ async function main() {
     assert(loginResult.ok(), 'Login: ' + loginResult.status());
     await page.waitForURL((url) => !url.pathname.startsWith('/login'));
     await page.getByRole('heading', { level: 1 }).waitFor();
-    assert.equal(
-      (await (await person.context.request.get(base + '/api/wasl/me')).json()).email,
-      email,
-    );
+    const me = await page.evaluate(async () => {
+      const response = await fetch('/api/wasl/me');
+      return { status: response.status, email: (await response.json()).email };
+    });
+    assert.equal(me.status, 200);
+    assert.equal(me.email, email);
     return person;
   }
   async function save(page, fields) {
@@ -154,6 +282,10 @@ async function main() {
   const platform = await signIn('platform@wasl.test');
   console.log('PASS real login and role routing for five roles');
   await activate(student);
+  await student.page.getByRole('button', { name: 'عربي', exact: true }).click();
+  await student.page.locator('html[lang="ar"][dir="rtl"]').waitFor({ state: 'attached' });
+  await student.page.getByRole('button', { name: 'English', exact: true }).click();
+  await student.page.locator('html[lang="en"][dir="ltr"]').waitFor({ state: 'attached' });
   await student.page
     .getByRole('combobox', { name: 'Navigate', exact: true })
     .selectOption('lessons');
@@ -162,28 +294,41 @@ async function main() {
   console.log('PASS responsive web navigation at phone width');
   await activate(teacher);
   const cookies = await teacher.context.cookies();
-  for (const name of ['wasl.access', 'wasl.refresh', 'wasl.session']) {
+  const teacherSlot = cookies.find(c => c.name === 'wasl-session-slot')?.value;
+  assert.ok(teacherSlot);
+  for (const name of ['wasl.access.' + teacherSlot, 'wasl.refresh.' + teacherSlot, 'wasl-session-slot']) {
     const cookie = cookies.find((c) => c.name === name);
     assert(cookie?.httpOnly);
     assert.equal(cookie.sameSite, 'Lax');
+    if (production) assert.equal(cookie.secure, true, `${name} must be Secure in production`);
   }
   const csrf = await teacher.context.request.post(base + '/api/wasl/auth/switch-school', {
-    headers: { Origin: 'https://outside.example' },
+    headers: {
+      Origin: 'https://outside.example',
+      Cookie: cookies.filter((c) => c.name.startsWith('wasl.')).map((c) => `${c.name}=${c.value}`).join('; '),
+    },
     data: { schoolId: id(1), role: 'TEACHER' },
   });
   assert.equal(csrf.status(), 403);
-  const loginResponse = await teacher.context.request.post(base + '/api/wasl/auth/login', {
-    headers: { Origin: base },
-    data: { email: 'teacher1@wasl.test', password },
-  });
-  const responseBody = await loginResponse.json();
-  assert(!responseBody.accessToken && !responseBody.refreshToken);
-  await teacher.context.clearCookies({ name: 'wasl.access' });
+  const loginCheck = await teacher.page.evaluate(async (password) => {
+    const response = await fetch('/api/wasl/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'teacher1@wasl.test', password }),
+    });
+    const body = await response.json();
+    return { status: response.status, hasTokens: 'accessToken' in body || 'refreshToken' in body };
+  }, password);
+  assert.equal(loginCheck.status, 200);
+  assert.equal(loginCheck.hasTokens, false);
+  const loginSlot = (await teacher.context.cookies()).find(c => c.name === 'wasl-session-slot')?.value;
+  assert.ok(loginSlot);
+  await teacher.context.clearCookies({ name: 'wasl.access.' + loginSlot });
   await activate(teacher);
   await teacher.page.goto(base + '/teacher/lessons');
   await teacher.page.getByRole('heading', { name: 'Lessons', exact: true }).waitFor();
   await teacher.page.getByRole('link', { name: 'View', exact: true }).first().waitFor();
-  assert((await teacher.context.cookies()).find((c) => c.name === 'wasl.access'));
+  assert((await teacher.context.cookies()).find((c) => c.name === 'wasl.access.' + loginSlot));
   console.log('PASS HttpOnly session cookies, CSRF rejection, token redaction and refresh');
   await teacher.page.evaluate(() =>
     localStorage.setItem('wasl.platform-demo.v1', 'preserve-this-existing-demo-document'),
@@ -228,6 +373,8 @@ async function main() {
   await student.page.getByText('Saved.', { exact: true }).waitFor();
   await activate(student);
   await student.page.reload();
+  // The form appears before the submission request has populated the saved draft.
+  await student.page.getByRole('button', { name: 'Save answer draft', exact: true }).waitFor();
   assert.equal(
     await student.page.locator(`textarea[name="answer-${questionId}"]`).inputValue(),
     'My saved API answer',
@@ -270,6 +417,10 @@ async function main() {
   await parent.page.goto(base + `/parent/results?child=${id(112)}&school=${id(1)}`);
   await parent.page.locator('tr').filter({ hasText: 'Connected integration assessment' }).waitFor();
   console.log('PASS teacher grading and explicit result release to student and verified parent');
+  await parent.page.goto(base + `/parent/lessons?child=${id(122)}&school=${id(2)}`);
+  await parent.page.getByText('Introduction', { exact: true }).waitFor();
+  assert.equal(await parent.page.getByText('Teacher draft', { exact: true }).count(), 0);
+  console.log('PASS verified parent learning across schools and draft exclusion');
   await activate(teacher);
   await teacher.page.goto(base + '/teacher/resources/new');
   await teacher.page.locator('[name=title]').fill('Connected worksheet');
@@ -288,7 +439,14 @@ async function main() {
   await activate(student);
   await student.page.goto(base + '/student/resources/' + resourceId);
   const downloaded = student.page.waitForEvent('download');
+  const downloadResponse = student.page.waitForResponse(
+    (response) => /\/api\/wasl\/files\/[^/]+\/content$/.test(response.url()),
+  );
   await student.page.getByRole('button', { name: 'Download file', exact: true }).click();
+  const headers = (await downloadResponse).headers();
+  assert.equal(headers['cache-control'], 'private, no-store');
+  assert.equal(headers['x-content-type-options'], 'nosniff');
+  assert.match(headers['content-disposition'], /^attachment;/i);
   const download = await downloaded;
   const file = await download.path();
   assert.deepEqual(await require('node:fs/promises').readFile(file), testPdf);
@@ -347,7 +505,10 @@ async function main() {
   );
   await activate(student);
   await student.page.goto(base + '/student/announcements');
-  await student.page.getByRole('alert').waitFor();
+  await student.page
+    .getByRole('alert')
+    .filter({ hasText: 'Could not reach the service. Please retry.' })
+    .waitFor();
   assert.equal(
     await student.page.getByText('Connected class announcement', { exact: true }).count(),
     0,
@@ -364,6 +525,8 @@ async function main() {
   console.log(
     'PASS retry without fixture fallback, preservation of demo data, logout and session clearing',
   );
+  await pause();
+  await verifyParentSession(production);
   const out = process.env.WASL_TEST_ARTIFACTS;
   if (out) {
     await activate(student);

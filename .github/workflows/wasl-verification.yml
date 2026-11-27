@@ -1,0 +1,110 @@
+name: Wasl verification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'ci/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wasl-verification-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: 'true'
+  NEXT_TELEMETRY_DISABLED: '1'
+  EXPO_NO_TELEMETRY: '1'
+
+defaults:
+  run:
+    working-directory: Wasl
+    shell: bash
+
+jobs:
+  application:
+    name: Application, browser and dependency checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check whitespace in the change
+        working-directory: .
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          git diff --check
+          if [[ -n "$BASE_SHA" && "$BASE_SHA" != 0000000000000000000000000000000000000000 ]]; then
+            git diff --check "$BASE_SHA" HEAD
+          elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+            git diff --check HEAD^ HEAD
+          else
+            git diff-tree --check --root --no-commit-id -r HEAD
+          fi
+      - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: '24.14.0'
+          package-manager-cache: false
+      - name: Install locked dependencies
+        id: install
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Shared typecheck and build
+        run: |
+          pnpm --filter @wasl/shared typecheck
+          pnpm --filter @wasl/shared build
+      - name: API production build, typecheck and Jest
+        run: |
+          pnpm --filter @wasl/api build
+          pnpm --filter @wasl/api typecheck
+          pnpm --filter @wasl/api test
+      - name: Web typecheck, lint, production build and proxy tests
+        run: |
+          pnpm --filter @wasl/web typecheck
+          pnpm --filter @wasl/web lint
+          pnpm --filter @wasl/web build
+          pnpm --filter @wasl/web test:session
+      - name: Expo typecheck
+        run: pnpm --filter @wasl/mobile typecheck
+      - name: Install Playwright Chromium
+        run: pnpm --filter @wasl/web exec playwright install --with-deps chromium
+      - name: Production web browser workflow
+        env:
+          WASL_TEST_WEB_PRODUCTION: '1'
+        run: pnpm --filter @wasl/web test:integration
+      - name: Expo web export and browser workflow
+        run: pnpm --filter @wasl/web test:mobile
+      - name: Report dependency advisories
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm ci:audit
+
+  database:
+    name: PostgreSQL migrations and security regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: '24.14.0'
+          package-manager-cache: false
+      - name: Install locked dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Build Shared and generate the Prisma client
+        run: |
+          pnpm --filter @wasl/shared build
+          pnpm --filter @wasl/api exec prisma generate
+      - name: Run migrations and restricted-role tests in a disposable PostgreSQL service
+        run: pnpm ci:database

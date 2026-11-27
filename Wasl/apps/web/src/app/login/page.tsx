@@ -52,7 +52,17 @@ export default function Login() {
                 onChange={(e) => setPassword(e.target.value)}
               />
             </label>
-            {s.error && (
+            {s.error === 'revocationUnconfirmed' && (
+              <div className="form-alert">
+                <p role="alert">
+                  {ar ? 'تعذّر تأكيد إنهاء الجلسة على الخادم.' : 'Server sign-out could not be confirmed.'}
+                </p>
+                <button type="button" disabled={s.busy} onClick={() => void s.logout()}>
+                  {ar ? 'إعادة محاولة تسجيل الخروج' : 'Retry sign-out'}
+                </button>
+              </div>
+            )}
+            {s.error && s.error !== 'revocationUnconfirmed' && (
               <p role="alert" className="form-alert">
                 {s.error === 'invalidCredentials'
                   ? ar

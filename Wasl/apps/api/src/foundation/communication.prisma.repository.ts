@@ -16,7 +16,11 @@ export function prismaCommunication(tx: Prisma.TransactionClient, schoolId: stri
     announcements: () => tx.announcement.findMany({ where: { schoolId } }),
     announcement: id => tx.announcement.findFirst({ where: { schoolId, id } }),
     createAnnouncement: data => { scoped(data); return tx.announcement.create({ data }); },
-    updateAnnouncement: data => { scoped(data); return tx.announcement.update({ where: { id: data.id, schoolId }, data }); },
+    updateAnnouncement: row => {
+      scoped(row);
+      const { id, title, body, status, publishedAt } = row;
+      return tx.announcement.update({ where: { id, schoolId }, data: { title, body, status, publishedAt } });
+    },
     notifications: async id => id === userId ? (await tx.notification.findMany({ where: { schoolId, userId: id, type: { in: [...NOTIFICATION_TYPES] } } })).map(map) : [],
     notify: async rows => { rows.forEach(scoped); if (rows.length) await tx.notification.createMany({ data: rows.map(n => ({ ...n, payload: { ...n.payload } })), skipDuplicates: true }); },
     markRead: async (id, recipient, at) => {

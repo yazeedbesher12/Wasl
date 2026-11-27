@@ -1,4 +1,4 @@
-import type { AnnouncementCreate, AnnouncementDto, AnnouncementQuery, AnnouncementUpdate, FileDto, NotificationDto, NotificationQuery } from './communication';
+import type { AnnouncementCreate, AnnouncementDto, AnnouncementQuery, AnnouncementUpdate, FileDto, NotificationDto, NotificationQuery, ParentFileContext } from './communication';
 import type { LoginResponse, MeDto, TokenPair } from './index';
 import { ACADEMIC_PATHS } from './foundation';
 import type { AcademicCreate, AcademicDtoMap, AcademicKind, AcademicOverviewDto, AcademicUpdate, ChildDto, ClassDto, LessonCreate, LessonDto, LessonUpdate, LinkStatus, ListQuery, MembershipCreate, Page, ParentLinkCreate, ParentLinkDto, ProfileUpdate, PublishStatus, QuestionAuthorDto, QuestionBankCreate, QuestionBankDto, QuestionBankUpdate, QuestionCreate, QuestionSafeDto, QuestionType, QuestionUpdate, ResourceCreate, ResourceDto, ResourceType, ResourceUpdate, RosterEntryDto, SchoolAdministratorCreate, SchoolCreate, SchoolDto, SchoolMembershipDto, SchoolSummaryDto, SchoolUpdate, StorageHealthDto, UnitCreate, UnitDto, UnitUpdate, UserCreate, UserDto } from './foundation';
@@ -117,13 +117,13 @@ export class WaslClient {
   myGrades(query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'>) { return this.request<Page<ReleasedResultDto>>('/me/grades' + this.query(query)); }
   childGrades(studentId: string, query?: Pick<ListQuery, 'page' | 'limit' | 'search' | 'sort' | 'order'> & { schoolId?: string }) { return this.request<Page<ReleasedResultDto>>('/parent/children/' + encodeURIComponent(studentId) + '/grades' + this.query(query)); }
   uploadFile(form: FormData) { return this.request<FileDto>('/files', { method: 'POST', body: form }); }
-  resolveFile(storageKey: string) { return this.request<FileDto>('/files/resolve' + this.query({ storageKey })); }
+  resolveFile(storageKey: string, child?: ParentFileContext) { return this.request<FileDto>('/files/resolve' + this.query({ storageKey, ...child })); }
   childLearning(studentId: string, schoolId?: string) { return this.request<import('./communication').ParentLearningDto>('/parent/children/' + encodeURIComponent(studentId) + '/learning' + this.query({ schoolId })); }
   childAssessment(studentId: string, id: string, schoolId?: string) { return this.request<AssessmentDetailDto>('/parent/children/' + encodeURIComponent(studentId) + '/assessments/' + encodeURIComponent(id) + this.query({ schoolId })); }
-  file(id: string) { return this.request<FileDto>('/files/' + encodeURIComponent(id)); }
-  async downloadFile(id: string): Promise<Blob> {
+  file(id: string, child?: ParentFileContext) { return this.request<FileDto>('/files/' + encodeURIComponent(id) + this.query(child)); }
+  async downloadFile(id: string, child?: ParentFileContext): Promise<Blob> {
     const token = this.getToken();
-    const response = await fetch(this.baseUrl + '/files/' + encodeURIComponent(id) + '/content', { headers: token ? { Authorization: 'Bearer ' + token } : {} });
+    const response = await fetch(this.baseUrl + '/files/' + encodeURIComponent(id) + '/content' + this.query(child), { headers: token ? { Authorization: 'Bearer ' + token } : {} });
     if (!response.ok) { const body = await response.json(); throw Object.assign(new Error(body?.message ?? response.statusText), { status: response.status, body }); }
     return response.blob();
   }

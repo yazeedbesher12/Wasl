@@ -13,6 +13,12 @@ import { developmentState } from './memory.seed';
   }
   if (driver !== 'prisma') throw new Error('Unsupported storage driver');
   const { PrismaStorage } = await import('./prisma.adapter');
-  return PrismaStorage.open(config.getOrThrow<string>('DATABASE_URL'));
+  return PrismaStorage.open({
+    auth: config.getOrThrow<string>('AUTH_DATABASE_URL'),
+    platform: config.getOrThrow<string>('PLATFORM_DATABASE_URL'),
+    tenant: config.getOrThrow<string>('DATABASE_URL'),
+    academicAdmin: config.getOrThrow<string>('ACADEMIC_ADMIN_DATABASE_URL'),
+    assessmentStaff: config.getOrThrow<string>('ASSESSMENT_STAFF_DATABASE_URL'),
+  }, Buffer.from(config.getOrThrow<string>('WASL_SUBJECT_PROOF_KEY'), 'hex'));
 } }], exports: [STORAGE] })
 export class StorageModule {}

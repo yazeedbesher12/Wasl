@@ -14,7 +14,7 @@ import type {
 } from '@wasl/shared';
 import { catalog, rowName, type Row } from '../../../../packages/shared/src/connected';
 import { text } from '../../../../packages/shared/src/demo';
-import { NativeApi } from './transport';
+import { NativeApi, SessionChangedError } from './transport';
 import { Presentation } from '../presentation';
 
 export type Route = { page: string; id?: string; edit?: boolean };
@@ -84,6 +84,7 @@ function useStateValue() {
       () => {
         setUser(null);
         setChild(undefined);
+        setFamily([]);
         setRows([]);
         setRecord(undefined);
         setRefs({});
@@ -107,16 +108,18 @@ function useStateValue() {
     );
   };
   async function restore() {
+    const epoch = api.epoch;
     setError('');
     setReady(false);
     try {
       if (await api.restore()) {
-        const me = await api.call<MeDto>('me');
+        const me = await api.call<MeDto>('me', 'GET', undefined, epoch);
+        api.assertCurrent(epoch);
         setUser(me);
         setStack([{ page: me.activeRole === 'PARENT' ? 'children' : 'dashboard' }]);
       }
     } catch (e) {
-      setError(describe(e));
+      if (epoch === api.epoch) setError(describe(e));
     } finally {
       setReady(true);
     }
@@ -200,14 +203,18 @@ function useStateValue() {
     lock.current = true;
     setBusy(true);
     setError('');
+    const signingIn = api.login(email.trim(), password);
+    const epoch = api.epoch;
     try {
-      const me = await api.login(email.trim(), password);
+      const me = await signingIn;
+      api.assertCurrent(epoch);
       setUser(me);
       setStack([{ page: me.activeRole === 'PARENT' ? 'children' : 'dashboard' }]);
       setChild(undefined);
+      setFamily([]);
       setDirty(false);
     } catch (e) {
-      setError(describe(e));
+      if (epoch === api.epoch) setError(describe(e));
     } finally {
       setBusy(false);
       lock.current = false;
@@ -221,16 +228,26 @@ function useStateValue() {
     setRows([]);
     setRecord(undefined);
     setRefs({});
+    const origin = api.epoch;
     try {
       const me = await api.switchContext(schoolId, role);
+      api.assertCurrent(origin + 1);
       setUser(me);
       setChild(selectedChild);
+      setFamily([]);
       setStack([
         { page: selectedChild ? 'classes' : role === 'PARENT' ? 'children' : 'dashboard' },
       ]);
       setDirty(false);
     } catch (e) {
-      setError(describe(e));
+      if (!(e instanceof SessionChangedError) && (api.epoch === origin || api.epoch === origin + 1)) {
+        if (api.epoch !== origin) {
+          setUser(null);
+          setChild(undefined);
+          setFamily([]);
+        }
+        setError(describe(e));
+      }
     } finally {
       setBusy(false);
       lock.current = false;
@@ -240,17 +257,20 @@ function useStateValue() {
     if (lock.current || !(await leave())) return;
     lock.current = true;
     setBusy(true);
+    const signingOut = api.logout();
+    const epoch = api.epoch;
+    setUser(null);
+    setChild(undefined);
+    setFamily([]);
+    setRows([]);
+    setRecord(undefined);
+    setRefs({});
+    setDirty(false);
+    setSuccess('');
     try {
-      await api.logout();
-      setUser(null);
-      setChild(undefined);
-      setRows([]);
-      setRecord(undefined);
-      setRefs({});
-      setDirty(false);
-      setSuccess('');
+      await signingOut;
     } catch (e) {
-      setError(describe(e));
+      if (epoch === api.epoch) setError(describe(e));
     } finally {
       lock.current = false;
       setBusy(false);
@@ -262,7 +282,7 @@ function useStateValue() {
     setLanguage(next);
     void AsyncStorage.setItem('wasl.locale', next).catch(() => undefined);
   }
-  const principal = `${user?.id}:${user?.activeSchoolId}:${role}`;
+  const principal = `${user?.id}:${user?.activeSchoolId}:${role}:${api.epoch}`;
   const scope = JSON.stringify([
     principal,
     route.page,
@@ -282,22 +302,24 @@ function useStateValue() {
     setRecord(undefined);
     setRefs({});
     setError('');
+    const call = <T,>(path: string) => api.call<T>(path, 'GET', undefined, epoch);
+    const all = <T,>(path: string) => api.all<T>(path, epoch);
     const load = async () => {
       const references: Record<string, Row[]> = {};
       let bundle: ParentLearningDto | undefined;
       if (role === 'PARENT') {
-        const family = await api.all<ChildDto>('parent/children');
-        if (active) setFamily(family);
+        const family = await all<ChildDto>('parent/children');
+        if (active && epoch === api.epoch) setFamily(family);
         if (child) {
           if (!family.some((c) => c.link.id === child.link.id))
             throw Object.assign(new Error(), { status: 404 });
           const query = '?schoolId=' + child.school.id;
-          bundle = await api.call<ParentLearningDto>(
+          bundle = await call<ParentLearningDto>(
             `parent/children/${child.student.id}/learning${query}`,
           );
           references.assignments = classes(
             (
-              await api.call<{ classes: ClassDto[] }>(
+              await call<{ classes: ClassDto[] }>(
                 `parent/children/${child.student.id}/overview${query}`,
               )
             ).classes,
@@ -307,11 +329,11 @@ function useStateValue() {
           references.lessons = bundle.lessons as unknown as Row[];
         }
       } else if (role === 'TEACHER' || role === 'STUDENT')
-        references.assignments = classes(await api.all<ClassDto>('me/classes'), ar);
+        references.assignments = classes(await all<ClassDto>('me/classes'), ar);
       if (role === 'TEACHER' && ['submissions', 'gradebook'].includes(key)) {
         const students: Row[] = [];
         for (const c of references.assignments ?? []) {
-          const roster = await api.all<{ student: { id: string; fullName: string } }>(
+          const roster = await all<{ student: { id: string; fullName: string } }>(
             'teacher/classes/' + c.id + '/roster',
           );
           students.push(...roster.map((r) => ({ ...r.student })));
@@ -330,8 +352,8 @@ function useStateValue() {
         const type = (
           { teachers: 'TEACHER', students: 'STUDENT', parents: 'PARENT' } as Record<string, string>
         )[source];
-        if (type) references[source] = await api.all<Row>('users?role=' + type);
-        else if (catalog[source]) references[source] = await api.all<Row>(catalog[source].path);
+        if (type) references[source] = await all<Row>('users?role=' + type);
+        else if (catalog[source]) references[source] = await all<Row>(catalog[source].path);
       }
       if (['dashboard', 'academics', 'children', 'profile', 'more'].includes(key))
         return { references, data: [] };
@@ -339,13 +361,13 @@ function useStateValue() {
       if (key === 'classes') {
         if (role === 'SCHOOL_ADMIN')
           references.assignments = classes(
-            (await api.call<{ classes: ClassDto[] }>('school/academic-overview')).classes,
+            (await call<{ classes: ClassDto[] }>('school/academic-overview')).classes,
             ar,
           );
         return { references, data: references.assignments ?? [] };
       }
       if (key === 'results') {
-        const results = await api.all<{ id: string; assessment: Row; submission: Row }>(
+        const results = await all<{ id: string; assessment: Row; submission: Row }>(
           role === 'PARENT'
             ? `parent/children/${child!.student.id}/grades?schoolId=${child!.school.id}`
             : 'me/grades',
@@ -359,16 +381,16 @@ function useStateValue() {
       }
       if (['submissions', 'gradebook'].includes(key)) {
         if (route.id)
-          return { references, data: [], row: await api.call<Row>('submissions/' + route.id) };
+          return { references, data: [], row: await call<Row>('submissions/' + route.id) };
         const data: Row[] = [];
         for (const assessment of references.assessments ?? []) {
           if (role === 'STUDENT') {
             try {
-              data.push(await api.call<Row>(`assessments/${assessment.id}/submission`));
+              data.push(await call<Row>(`assessments/${assessment.id}/submission`));
             } catch (e) {
               if ((e as { status?: number }).status !== 404) throw e;
             }
-          } else data.push(...(await api.all<Row>(`assessments/${assessment.id}/submissions`)));
+          } else data.push(...(await all<Row>(`assessments/${assessment.id}/submissions`)));
         }
         return { references, data };
       }
@@ -378,7 +400,7 @@ function useStateValue() {
         ] as unknown as Row[];
         const row =
           key === 'assessments' && route.id
-            ? await api.call<Row>(
+            ? await call<Row>(
                 `parent/children/${child!.student.id}/assessments/${route.id}?schoolId=${child!.school.id}`,
               )
             : data.find((r) => r.id === route.id);
@@ -389,14 +411,14 @@ function useStateValue() {
       if (!config) throw Object.assign(new Error(), { status: 404 });
       if (route.id === 'new') return { references, data: [] };
       if (route.id)
-        return { references, data: [], row: await api.call<Row>(config.path + '/' + route.id) };
+        return { references, data: [], row: await call<Row>(config.path + '/' + route.id) };
       if (key === 'questions') {
         const data: Row[] = [];
         for (const bank of references.banks ?? [])
-          data.push(...(await api.all<Row>(`question-banks/${bank.id}/questions`)));
+          data.push(...(await all<Row>(`question-banks/${bank.id}/questions`)));
         return { references, data };
       }
-      return { references, data: await api.all<Row>(config.path) };
+      return { references, data: await all<Row>(config.path) };
     };
     void load()
       .then((value) => {
