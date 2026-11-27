@@ -1,0 +1,32 @@
+name: wasl-postgres17-dev
+
+services:
+  postgres:
+    image: postgres:17@sha256:87c8b42f423b45d5247e6aa8fdb2e7762fec164c68a50fe3eb07e7bfcaf4dbcf
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wasl_dev
+      POSTGRES_USER: wasl_migrate
+      POSTGRES_PASSWORD: ${WASL_DEV_MIGRATOR_PASSWORD:?Set WASL_DEV_MIGRATOR_PASSWORD in .env.postgres.local}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
+      WASL_DEV_AUTH_PASSWORD: ${WASL_DEV_AUTH_PASSWORD:?Set WASL_DEV_AUTH_PASSWORD in .env.postgres.local}
+      WASL_DEV_PLATFORM_PASSWORD: ${WASL_DEV_PLATFORM_PASSWORD:?Set WASL_DEV_PLATFORM_PASSWORD in .env.postgres.local}
+      WASL_DEV_TENANT_PASSWORD: ${WASL_DEV_TENANT_PASSWORD:?Set WASL_DEV_TENANT_PASSWORD in .env.postgres.local}
+      WASL_DEV_ACADEMIC_ADMIN_PASSWORD: ${WASL_DEV_ACADEMIC_ADMIN_PASSWORD:?Set WASL_DEV_ACADEMIC_ADMIN_PASSWORD in .env.postgres.local}
+      WASL_DEV_ASSESSMENT_STAFF_PASSWORD: ${WASL_DEV_ASSESSMENT_STAFF_PASSWORD:?Set WASL_DEV_ASSESSMENT_STAFF_PASSWORD in .env.postgres.local}
+    ports:
+      - "127.0.0.1:${WASL_DEV_POSTGRES_PORT:-55437}:5432"
+    volumes:
+      - wasl_postgres17_dev_data:/var/lib/postgresql/data
+      - ./infra/postgres/dev-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U wasl_migrate -d wasl_dev"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    stop_grace_period: 30s
+
+volumes:
+  wasl_postgres17_dev_data:
+    name: wasl_postgres17_dev_data

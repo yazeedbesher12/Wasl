@@ -8,6 +8,12 @@
     "lint": "turbo run lint",
     "ci:database": "node scripts/ci-database.cjs",
     "ci:audit": "node scripts/ci-audit.cjs",
+    "db:dev:configure": "node scripts/create-dev-postgres-env.cjs",
+    "db:dev:up": "docker compose --env-file .env.postgres.local -f compose.postgres-dev.yml up -d --wait postgres",
+    "db:dev:bootstrap": "node scripts/dev-postgres.cjs bootstrap",
+    "db:dev:api": "node scripts/dev-postgres.cjs api",
+    "db:dev:logs": "docker compose --env-file .env.postgres.local -f compose.postgres-dev.yml logs -f postgres",
+    "db:dev:down": "docker compose --env-file .env.postgres.local -f compose.postgres-dev.yml down",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck"
   },
