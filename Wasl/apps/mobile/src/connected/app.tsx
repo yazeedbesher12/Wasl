@@ -12,12 +12,40 @@ import {
   type Row,
 } from '../../../../packages/shared/src/connected';
 import { Button, Card, Field, Select, Txt, styles } from '../ui';
-import { NativeEducationArt, NativeEducationBackground } from '../education';
+import { NativeEducationArt, NativeEducationBackground, NativeQuickActions, NativeWelcome } from '../education';
+import { BottomInset, HeaderPill, ScreenTransition, ShellHeader, TabBar } from '../shell';
+import { Gradient, RoleThemeProvider } from '../theme';
+import { initials, paletteFor } from '../../../../packages/shared/src/demo';
 import { ConnectedProvider, confirmAction, useConnected } from './context';
 import { RecordForm } from './form';
 import { AssessmentView, SubmissionView } from './workflows';
 import { download } from './files';
 
+const welcomeTheme: Record<string, 'platform' | 'school' | 'teacher' | 'student' | 'parent'> = {
+  PLATFORM_ADMIN: 'platform',
+  SCHOOL_ADMIN: 'school',
+  TEACHER: 'teacher',
+  STUDENT: 'student',
+  PARENT: 'parent',
+};
+const welcomeIntro: Record<string, [string, string]> = {
+  PLATFORM_ADMIN: ['تابع المدارس المتصلة وأدِر المنصة.', 'Follow connected schools and manage the platform.'],
+  SCHOOL_ADMIN: ['أدِر الأعضاء والصفوف والسنة الدراسية.', 'Manage members, classes and the academic year.'],
+  TEACHER: ['صفوفك ودروسك وتقييماتك جاهزة.', 'Your classes, lessons and assessments are ready.'],
+  STUDENT: ['مهامك ودروسك بانتظارك. يلا نبدأ!', 'Your tasks and lessons are waiting. Let’s go!'],
+  PARENT: ['تابع تعلّم أبنائك ونتائجهم المنشورة.', 'Follow your children’s learning and results.'],
+};
+function ChildAvatar({ name, seed }: { name: string; seed: string }) {
+  const [from, to] = paletteFor(seed);
+  return (
+    <Gradient
+      colors={[from, to]}
+      style={{ width: 54, height: 54, borderRadius: 18, alignItems: 'center', justifyContent: 'center' }}
+    >
+      <Txt style={{ color: '#fff', fontWeight: '800', fontSize: 18, textAlign: 'center' }}>{initials(name)}</Txt>
+    </Gradient>
+  );
+}
 export function ConnectedApp() {
   return (
     <ConnectedProvider>
@@ -40,28 +68,26 @@ function Shell() {
             : ['dashboard', 'classes', 'submissions', 'more'];
   const screenKey = `${user?.id}:${user?.activeSchoolId}:${role}:${n.child?.link.id}:${route.page}:${route.id}:${route.edit}`;
   return (
+    <RoleThemeProvider role={role}>
     <SafeAreaView
-      style={[styles.screen, { backgroundColor: '#10264D', direction: ar ? 'rtl' : 'ltr' }]}
+      edges={['left', 'right']}
+      style={[styles.screen, { direction: ar ? 'rtl' : 'ltr' }]}
     >
       <StatusBar style="light" />
-      <View style={styles.header}>
+      <ShellHeader>
         <View style={[styles.row, { justifyContent: 'space-between' }]}>
-          <Txt style={{ color: 'white', fontWeight: '700' }}>
-            {ar ? 'وصل' : 'Wasl'}
-            {user ? ' · ' + user.fullName : ''}
-          </Txt>
+          <View style={{ flex: 1 }}>
+            <Txt style={{ color: 'white', fontWeight: '800', fontSize: 18 }}>{ar ? 'وصل' : 'Wasl'}</Txt>
+            {user && <Txt style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12 }}>{user.fullName}</Txt>}
+          </View>
           <View style={styles.row}>
-            <Button secondary onPress={() => void n.setLocale('ar')}>
-              عربي
-            </Button>
-            <Button secondary onPress={() => void n.setLocale('en')}>
-              English
-            </Button>
+            <HeaderPill label="عربي" selected={ar} onPress={() => void n.setLocale('ar')} />
+            <HeaderPill label="English" selected={!ar} onPress={() => void n.setLocale('en')} />
           </View>
         </View>
         {user && (
           <>
-            <View style={{ backgroundColor: '#F0F5FF', borderRadius: 12, padding: 10 }}>
+            <View style={{ backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 16, padding: 10, paddingBottom: 0 }}>
               <Select
                 label={ar ? 'المدرسة والدور' : 'School and role'}
                 value={JSON.stringify([user.activeSchoolId, user.activeRole])}
@@ -87,9 +113,9 @@ function Shell() {
             </View>
           </>
         )}
-      </View>
+      </ShellHeader>
       <KeyboardAvoidingView
-        style={{ flex: 1, backgroundColor: '#F0F5FF' }}
+        style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <NativeEducationBackground />
@@ -122,30 +148,29 @@ function Shell() {
           {!n.ready ? (
             <Txt>{ar ? 'جاري التحميل...' : 'Loading...'}</Txt>
           ) : user ? (
-            <>
+            <ScreenTransition>
               <Txt title accessibilityRole="header">
                 {word(route.page, ar)}
                 {n.child ? ' · ' + n.child.student.fullName : ''}
               </Txt>
               <Content />
-            </>
+            </ScreenTransition>
           ) : (
             <Login />
           )}
         </ScrollView>
       </KeyboardAvoidingView>
-      {user && (
-        <View style={styles.tabs}>
-          {tabs.map((page) => (
-            <View key={page} style={styles.tab}>
-              <Button secondary={page !== route.page} onPress={() => void n.go({ page })}>
-                {word(page, ar)}
-              </Button>
-            </View>
-          ))}
-        </View>
+      {user ? (
+        <TabBar
+          tabs={tabs.map((page) => ({ page, label: word(page, ar) }))}
+          selected={route.page}
+          onSelect={(page) => void n.go({ page })}
+        />
+      ) : (
+        <BottomInset />
       )}
     </SafeAreaView>
+    </RoleThemeProvider>
   );
 }
 function Login() {
@@ -190,39 +215,37 @@ function Content() {
   if (route.page === 'dashboard' || route.page === 'more')
     return (
       <>
-        <Card>
-          <NativeEducationArt theme="student" />
-          <Txt title>
-            {ar ? 'أهلًا، ' : 'Welcome, '}
-            {n.user?.fullName}
-          </Txt>
-        </Card>
-        {roleNav[role!]
-          .filter((p) => p !== route.page)
-          .map((p) => (
-            <Button secondary key={p} onPress={() => void n.go({ page: p })}>
-              {word(p, ar)}
-            </Button>
-          ))}
+        {route.page === 'dashboard' && (
+          <NativeWelcome
+            theme={welcomeTheme[role ?? ''] ?? 'entry'}
+            title={word(role ?? '', ar)}
+            name={(ar ? 'أهلًا، ' : 'Welcome, ') + (n.user?.fullName ?? '')}
+            intro={(welcomeIntro[role ?? ''] ?? welcomeIntro.STUDENT)[ar ? 0 : 1]}
+          />
+        )}
+        <NativeQuickActions
+          rows={roleNav[role!]
+            .filter((p) => p !== route.page)
+            .map((p) => ({ page: p, label: word(p, ar) }))}
+          open={(p) => void n.go({ page: p })}
+        />
       </>
     );
   if (route.page === 'academics')
     return (
-      <>
-        {academics.map((p) => (
-          <Button secondary key={p} onPress={() => void n.go({ page: p })}>
-            {word(p, ar)}
-          </Button>
-        ))}
-      </>
+      <NativeQuickActions
+        rows={academics.map((p) => ({ page: p, label: word(p, ar) }))}
+        open={(p) => void n.go({ page: p })}
+      />
     );
   if (route.page === 'children')
     return (
       <>
-        {n.family.map((c) => (
-          <Card key={c.link.id}>
+        {n.family.map((c, i) => (
+          <Card key={c.link.id} index={i}>
+            <ChildAvatar name={c.student.fullName} seed={c.student.id} />
             <Txt title>{c.student.fullName}</Txt>
-            <Txt>{ar ? c.school.nameAr || c.school.name : c.school.name}</Txt>
+            <Txt muted>{ar ? c.school.nameAr || c.school.name : c.school.name}</Txt>
             <Button onPress={() => void n.switchContext(c.school.id, 'PARENT', c)}>
               {ar ? 'عرض التعلم' : 'View learning'}
             </Button>
@@ -356,8 +379,8 @@ function Records() {
           {ar ? 'تعليم الكل كمقروء' : 'Mark all read'}
         </Button>
       )}
-      {rows.slice((page - 1) * 20, page * 20).map((row) => (
-        <Card key={row.id}>
+      {rows.slice((page - 1) * 20, page * 20).map((row, i) => (
+        <Card key={row.id} index={i}>
           <Txt title>
             {['submissions', 'gradebook'].includes(key)
               ? `${format(n.display(row, 'assessmentId'), ar)} · ${format(n.display(row, 'studentId'), ar)}`

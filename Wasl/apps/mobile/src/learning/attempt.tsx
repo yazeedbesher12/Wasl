@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, Pressable, View } from "react-native";
-import { date, label, number, tokens } from "../../../../packages/shared/src/demo";
+import { date, designTokens as tokens, label, number } from "../../../../packages/shared/src/demo";
 import type { RecordInput, TaskView } from "../../../../packages/shared/src/demo";
 import { useNative } from "../context";
 import { Button, Card, Field, styles, Txt } from "../ui";

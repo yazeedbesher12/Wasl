@@ -1,9 +1,11 @@
 import { Children, createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { AccessibilityInfo, Animated, AppState, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { designTokens as c, educationMotion, navigationGroup, subjectShapes, subjectTheme, welcomeShapes } from "../../../packages/shared/src/demo";
+import Reanimated from "react-native-reanimated";
+import { designTokens as c, educationMotion, gradients, greetingKey, navigationGroup, quickActionPalette, subjectShapes, subjectTheme, welcomeShapes } from "../../../packages/shared/src/demo";
 import type { VectorShape, WelcomeTheme } from "../../../packages/shared/src/demo";
 import { usePresentation as useNative } from "./presentation";
+import { Gradient, enterAt, haptic, screenEnter, useRoleTheme } from "./theme";
 
 const Motion = createContext(false);
 /** One accessibility/app lifecycle subscription for all native presentation components. */
@@ -34,55 +36,80 @@ export function NativeEducationArt({ theme = "student", subject, width = 280 }: 
   const shapes = subject !== undefined ? subjectShapes(subjectTheme(subject)) : welcomeShapes(theme);
   return <View accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" onLayout={e => setMeasured(e.nativeEvent.layout.width)} style={{ width, maxWidth: "100%", height: measured * sh / sw, alignSelf: "center", direction: "ltr" }}><View style={{ width: sw, height: sh, position: "absolute", start: 0, top: 0, transformOrigin: "left top", transform: [{ scale: measured / sw }] }}>{shapes.map((s, i) => <Shape key={i} s={s} />)}</View></View>;
 }
-export function NativeWelcome({ title, name, intro, theme, children }: { title: string; name?: string; intro: string; theme: WelcomeTheme; children?: ReactNode }) {
-  const { locale } = useNative(); const align = { textAlign: locale === "ar" ? "right" as const : "left" as const, writingDirection: locale === "ar" ? "rtl" as const : "ltr" as const };
-  const enabled = useEducationMotion(); const float = useRef(new Animated.Value(0)).current;
+/** Looping float; stops and resets whenever motion is disabled or the app is inactive. */
+function useFloat(enabled: boolean, distance: number, halfCycle: number) {
+  const float = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (!enabled) { float.setValue(0); return; }
-    const loop = Animated.loop(Animated.sequence([Animated.timing(float, { toValue: -5, duration: educationMotion.welcomeHalfCycle, isInteraction: false, useNativeDriver: true }), Animated.timing(float, { toValue: 0, duration: educationMotion.welcomeHalfCycle, isInteraction: false, useNativeDriver: true })]));
+    const loop = Animated.loop(Animated.sequence([Animated.timing(float, { toValue: -distance, duration: halfCycle, isInteraction: false, useNativeDriver: true }), Animated.timing(float, { toValue: 0, duration: halfCycle, isInteraction: false, useNativeDriver: true })]));
     loop.start(); return () => { loop.stop(); float.setValue(0); };
-  }, [enabled, float]);
-  return <View style={artStyles.welcome}><View pointerEvents="none" accessible={false} style={artStyles.orbit} /><Text style={[artStyles.eyebrow, align]}>{title}</Text><Text accessibilityRole="header" style={[artStyles.heading, align]}>{name || title}</Text><Text style={[artStyles.intro, align]}>{intro}</Text><Animated.View style={{ transform: [{ translateY: float }] }}><NativeEducationArt theme={theme} width={220} /></Animated.View>{children && <View style={artStyles.actions}>{Children.map(children, child => <View style={{ flex: 1, minWidth: 105 }}>{child}</View>)}</View>}</View>;
+  }, [enabled, float, distance, halfCycle]);
+  return float;
+}
+const greetingWords = { morning: ["صباح الخير", "Good morning", "☀️"], afternoon: ["نهارك سعيد", "Good afternoon", "🌤️"], evening: ["مساء الخير", "Good evening", "🌙"] } as const;
+/** Role-gradient welcome. `chips` must carry real data only. */
+export function NativeWelcome({ title, name, intro, theme, children, chips }: { title: string; name?: string; intro: string; theme: WelcomeTheme; children?: ReactNode; chips?: string[] }) {
+  const { locale } = useNative(); const align = { textAlign: locale === "ar" ? "right" as const : "left" as const, writingDirection: locale === "ar" ? "rtl" as const : "ltr" as const };
+  const enabled = useEducationMotion(); const float = useFloat(enabled, 12, educationMotion.welcomeHalfCycle); const r = useRoleTheme();
+  const g = greetingWords[greetingKey()];
+  return <Reanimated.View entering={screenEnter(enabled)} style={[artStyles.welcomeShadow, { shadowColor: r.from }]}>
+    <Gradient colors={[r.from, r.to]} style={artStyles.welcome}>
+      <View pointerEvents="none" accessible={false} style={artStyles.orbit} /><View pointerEvents="none" accessible={false} style={artStyles.glow} />
+      <Text style={[artStyles.eyebrow, align]}>{locale === "ar" ? g[0] : g[1]} {g[2]} · {title}</Text>
+      <Text accessibilityRole="header" style={[artStyles.heading, align]}>{name || title}</Text>
+      <Text style={[artStyles.intro, align]}>{intro}</Text>
+      {!!chips?.length && <View style={[artStyles.chips, { flexDirection: "row" }]}>{chips.map(chip => <Text key={chip} style={artStyles.chip}>{chip}</Text>)}</View>}
+      <Animated.View style={{ transform: [{ translateY: float }] }}><NativeEducationArt theme={theme} width={220} /></Animated.View>
+      {children && <View style={artStyles.actions}>{Children.map(children, child => <View style={{ flex: 1, minWidth: 105 }}>{child}</View>)}</View>}
+    </Gradient>
+  </Reanimated.View>;
 }
 export function NativeSubjects({ title, intro, rows, open }: { title: string; intro: string; rows: { id: string; name: string; subject: string; detail?: string }[]; open: (id: string) => void }) {
   const { locale, busy } = useNative();
   const align = { textAlign: locale === "ar" ? "right" as const : "left" as const };
+  const enabled = useEducationMotion(); const r = useRoleTheme();
   if (!rows.length) return null;
-  return <View style={artStyles.subjects}><Text accessibilityRole="header" style={[artStyles.sectionTitle, align]}>{title}</Text><Text style={[artStyles.subjectHelp, align]}>{intro}</Text><ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ gap: 9, paddingVertical: 14 }}><View style={{ flexDirection: "row", gap: 9 }}>{rows.map(row => <Pressable key={row.id} accessibilityRole="button" accessibilityState={{ disabled: busy }} disabled={busy} accessibilityLabel={`${row.name}${row.detail ? ` · ${row.detail}` : ""}`} onPress={() => open(row.id)} style={({ pressed }) => [artStyles.subject, pressed && { backgroundColor: "#E9F0FF" }]}><NativeEducationArt subject={row.subject} width={112} /><Text style={artStyles.subjectName}>{row.name}</Text>{row.detail && <Text style={artStyles.subjectDetail}>{row.detail}</Text>}</Pressable>)}</View></ScrollView></View>;
+  return <Reanimated.View entering={enterAt(1, enabled)} style={[artStyles.subjects, { shadowColor: r.from }]}><Text accessibilityRole="header" style={[artStyles.sectionTitle, align]}>{title}</Text><Text style={[artStyles.subjectHelp, align]}>{intro}</Text><ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ gap: 9, paddingVertical: 14 }}><View style={{ flexDirection: "row", gap: 9 }}>{rows.map((row, i) => <Reanimated.View key={row.id} entering={enterAt(i + 2, enabled)}><Pressable accessibilityRole="button" accessibilityState={{ disabled: busy }} disabled={busy} accessibilityLabel={`${row.name}${row.detail ? ` · ${row.detail}` : ""}`} onPress={() => open(row.id)} style={({ pressed }) => [artStyles.subject, { backgroundColor: r.soft }, pressed && { transform: [{ scale: .96 }] }]}><NativeEducationArt subject={row.subject} width={112} /><Text style={artStyles.subjectName}>{row.name}</Text>{row.detail && <Text style={artStyles.subjectDetail}>{row.detail}</Text>}</Pressable></Reanimated.View>)}</View></ScrollView></Reanimated.View>;
 }
 export function NativeNavigation({ pages, open, label }: { pages: string[]; open: (page: string) => void; label: (page: string) => string }) {
   const { t, locale, busy } = useNative();
-  return <View style={{ backgroundColor: c.navy, borderRadius: 23, padding: 17, gap: 10 }}>{["navWorkspace", "navManage", "navLearning", "navAccount"].map(group => {
+  const r = useRoleTheme(); const enabled = useEducationMotion();
+  return <Gradient colors={gradients.sidebar} style={{ borderRadius: 26, padding: 17, gap: 10, overflow: "hidden" }}>{["navWorkspace", "navManage", "navLearning", "navAccount"].map(group => {
     const rows = pages.filter(p => navigationGroup(p) === group); if (!rows.length) return null;
-    return <View key={group}><Text style={{ color: "#9CB4DA", fontSize: 11, marginVertical: 12, textAlign: locale === "ar" ? "right" : "left" }}>{t(group)}</Text>{rows.map(page => <Pressable key={page} accessibilityRole="button" disabled={busy} accessibilityState={{ disabled: busy }} onPress={() => open(page)} style={({ pressed }) => ({ minHeight: 52, flexDirection: "row", alignItems: "center", gap: 13, borderRadius: 12, paddingHorizontal: 14, backgroundColor: pressed ? "#315DE5" : "#18335C", marginBottom: 6 })}><NativeNavIcon page={page} /><Text style={{ color: "#FFFFFF", fontSize: 14, flex: 1, textAlign: locale === "ar" ? "right" : "left", paddingVertical: 12 }}>{label(page)}</Text><Text style={{ color: "#AFC6EF" }}>{locale === "ar" ? "‹" : "›"}</Text></Pressable>)}</View>;
+    return <View key={group}><Text style={{ color: "#9AA3D6", fontSize: 11, fontWeight: "700", marginVertical: 12, textAlign: locale === "ar" ? "right" : "left" }}>{t(group)}</Text>{rows.map((page, i) => <Reanimated.View key={page} entering={enterAt(i, enabled)}><Pressable accessibilityRole="button" disabled={busy} accessibilityState={{ disabled: busy }} onPress={() => { haptic(); open(page); }} style={({ pressed }) => ({ minHeight: 52, flexDirection: "row", alignItems: "center", gap: 13, borderRadius: 14, paddingHorizontal: 14, backgroundColor: pressed ? r.from : "rgba(255,255,255,0.07)", marginBottom: 6 })}><NativeNavIcon page={page} /><Text style={{ color: "#FFFFFF", fontSize: 14, fontWeight: "600", flex: 1, textAlign: locale === "ar" ? "right" : "left", paddingVertical: 12 }}>{label(page)}</Text><Text style={{ color: "#AFB8EF" }}>{locale === "ar" ? "‹" : "›"}</Text></Pressable></Reanimated.View>)}</View>;
+  })}</Gradient>;
+}
+/** Colourful gradient tiles. Accessible name is the label only. */
+export function NativeQuickActions({ rows, open }: { rows: { page: string; label: string }[]; open: (page: string) => void }) {
+  const { busy, locale } = useNative(); const enabled = useEducationMotion();
+  return <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>{rows.map((row, i) => {
+    const [from, to, glow] = quickActionPalette[i % quickActionPalette.length];
+    return <Reanimated.View key={row.page} entering={enterAt(i + 1, enabled)} style={{ flexBasis: "46%", flexGrow: 1 }}>
+      <Pressable accessibilityRole="button" disabled={busy} accessibilityState={{ disabled: busy }} onPress={() => { haptic(); open(row.page); }} style={({ pressed }) => ({ minHeight: 108, backgroundColor: "#FFFFFF", borderRadius: 22, padding: 15, gap: 12, borderWidth: 1, borderColor: c.border, shadowColor: `rgb(${glow})`, shadowOpacity: .16, shadowRadius: 14, shadowOffset: { width: 0, height: 8 }, elevation: 3, transform: [{ scale: pressed && enabled ? .96 : 1 }] })}>
+        <Gradient colors={[from, to]} style={{ width: 44, height: 44, borderRadius: 15, justifyContent: "center", alignItems: "center" }}><NativeNavIcon page={row.page} selected /></Gradient>
+        <Text style={{ color: c.text, fontWeight: "800", fontSize: 15, lineHeight: 23, textAlign: locale === "ar" ? "right" : "left" }}>{row.label}</Text>
+      </Pressable>
+    </Reanimated.View>;
   })}</View>;
 }
-export function NativeQuickActions({ rows, open }: { rows: { page: string; label: string }[]; open: (page: string) => void }) {
-  const { busy, locale } = useNative();
-  return <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>{rows.map(row => <Pressable key={row.page} accessibilityRole="button" disabled={busy} accessibilityState={{ disabled: busy }} onPress={() => open(row.page)} style={({ pressed }) => ({ flexBasis: "47%", flexGrow: 1, minHeight: 98, backgroundColor: pressed ? "#E3ECFF" : "#F0F5FF", borderRadius: 15, padding: 15, gap: 12, borderWidth: 1, borderColor: "#DFE8FA" })}><View style={{ width: 33, height: 33, backgroundColor: c.primary, borderRadius: 10, justifyContent: "center" }}><NativeNavIcon page={row.page} selected /></View><Text style={{ color: c.navy, fontWeight: "600", lineHeight: 23, textAlign: locale === "ar" ? "right" : "left" }}>{row.label}</Text></Pressable>)}</View>;
-}
+/** Soft drifting colour blobs behind content; static when motion is off. */
 export function NativeEducationBackground() {
-  const enabled = useEducationMotion(); const drift = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    if (!enabled) { drift.setValue(0); return; }
-    const loop = Animated.loop(Animated.sequence([Animated.timing(drift, { toValue: 10, duration: educationMotion.backgroundHalfCycle, isInteraction: false, useNativeDriver: true }), Animated.timing(drift, { toValue: 0, duration: educationMotion.backgroundHalfCycle, isInteraction: false, useNativeDriver: true })])); loop.start();
-    return () => { loop.stop(); drift.setValue(0); };
-  }, [enabled, drift]);
-  return <View pointerEvents="none" accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[StyleSheet.absoluteFill, { overflow: "hidden", opacity: .11 }]}><Animated.View style={{ position: "absolute", width: 210, height: 270, borderWidth: 1.5, borderColor: c.primary, borderRadius: 120, end: -140, top: 65, transform: [{ rotate: "-24deg" }, { translateY: drift }] }} /><View style={{ position: "absolute", width: 180, height: 230, borderWidth: 1.5, borderStyle: "dashed", borderColor: c.primary, borderRadius: 110, start: -120, bottom: 40, transform: [{ rotate: "35deg" }] }} />{[0,1,2,3].map(i => <View key={i} style={{ position: "absolute", width: 4, height: 4, backgroundColor: c.primary, borderRadius: 2, end: 13 + i * 12, top: 390 + i % 2 * 13 }} />)}</View>;
+  const enabled = useEducationMotion(); const r = useRoleTheme();
+  const a = useFloat(enabled, 26, educationMotion.backgroundHalfCycle); const b = useFloat(enabled, -22, educationMotion.backgroundHalfCycle * 1.3);
+  return <View pointerEvents="none" accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[StyleSheet.absoluteFill, { overflow: "hidden" }]}>
+    <Animated.View style={{ position: "absolute", width: 320, height: 320, borderRadius: 160, end: -150, top: -90, backgroundColor: r.from, opacity: .14, transform: [{ translateY: a }, { translateX: a }] }} />
+    <Animated.View style={{ position: "absolute", width: 280, height: 280, borderRadius: 140, start: -140, bottom: 60, backgroundColor: r.to, opacity: .11, transform: [{ translateY: b }] }} />
+    <Animated.View style={{ position: "absolute", width: 150, height: 150, borderRadius: 75, end: 30, top: 380, backgroundColor: c.yellow, opacity: .16, transform: [{ translateX: b }] }} />
+  </View>;
 }
+/** One-time entry reveal per mount. */
 export function NativeReveal({ children }: { children: ReactNode }) {
-  const enabled = useEducationMotion(); const entered = useRef(false); const progress = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    if (!enabled || entered.current) { progress.setValue(1); return; }
-    entered.current = true; progress.setValue(0);
-    const animation = Animated.timing(progress, { toValue: 1, duration: educationMotion.reveal, useNativeDriver: true }); animation.start();
-    return () => { animation.stop(); progress.setValue(1); };
-  }, [enabled, progress]);
-  return <Animated.View style={{ opacity: progress, transform: [{ translateY: progress.interpolate({ inputRange: [0,1], outputRange: [7,0] }) }] }}>{children}</Animated.View>;
+  const enabled = useEducationMotion(); const [first] = useState(enabled);
+  return <Reanimated.View entering={first ? screenEnter(true) : undefined}>{children}</Reanimated.View>;
 }
 /** Small consistent navigation mark; distinctive silhouettes without an icon dependency. */
-export function NativeNavIcon({ page, selected = false }: { page: string; selected?: boolean }) {
-  const color = selected ? "#FFFFFF" : "#ACC3EC";
+export function NativeNavIcon({ page, selected = false, color: tint }: { page: string; selected?: boolean; color?: string }) {
+  const color = tint ?? (selected ? "#FFFFFF" : "#C3CAF2");
   const grid = page === "dashboard" || page === "more";
   let mark: ReactNode;
   if (grid) mark = [0,1,2,3].map(n => <View key={n} style={{ width: 8, height: 8, borderRadius: page === "more" ? 4 : 2, borderWidth: 1.5, borderColor: color }} />);
@@ -95,13 +122,16 @@ export function NativeNavIcon({ page, selected = false }: { page: string; select
   return <View accessible={false} importantForAccessibility="no-hide-descendants" style={{ width: 21, height: 23, alignSelf: "center", flexDirection: "row", flexWrap: "wrap", gap: 3, direction: "ltr" }}>{mark}</View>;
 }
 export const artStyles = StyleSheet.create({
-  welcome: { borderRadius: 25, borderBottomStartRadius: 7, padding: 23, backgroundColor: "#E2ECFF", borderWidth: 1, borderColor: "#C9DAFA", overflow: "hidden", marginBottom: 22 },
-  orbit: { position: "absolute", width: 240, height: 240, borderWidth: 1, borderColor: "#B7CEF5", borderRadius: 120, end: -100, top: -90 },
-  eyebrow: { color: "#526E9E", fontSize: 13, textAlign: "auto", fontWeight: "600", marginBottom: 4 },
-  heading: { color: c.navy, fontSize: 28, lineHeight: 41, fontWeight: "800", textAlign: "auto", marginBottom: 7 },
-  intro: { color: "#526A91", fontSize: 13, lineHeight: 24, textAlign: "auto" },
-  actions: { gap: 9, marginTop: 7, flexDirection: "row", flexWrap: "wrap" }, subjects: { backgroundColor: c.surface, borderWidth: 1, borderColor: c.border, borderRadius: 24, padding: 18, marginBottom: 22 },
+  welcomeShadow: { borderRadius: 28, borderBottomStartRadius: 8, marginBottom: 22, shadowOpacity: .35, shadowRadius: 22, shadowOffset: { width: 0, height: 12 }, elevation: 8 },
+  welcome: { borderRadius: 28, borderBottomStartRadius: 8, padding: 23, overflow: "hidden" },
+  orbit: { position: "absolute", width: 240, height: 240, borderWidth: 2, borderStyle: "dashed", borderColor: "rgba(255,255,255,0.28)", borderRadius: 120, end: -100, top: -90 },
+  glow: { position: "absolute", width: 200, height: 200, borderRadius: 100, backgroundColor: "rgba(255,255,255,0.16)", start: -70, top: -70 },
+  eyebrow: { color: "rgba(255,255,255,0.92)", fontSize: 13, textAlign: "auto", fontWeight: "600", marginBottom: 4 },
+  heading: { color: "#FFFFFF", fontSize: 28, lineHeight: 41, fontWeight: "800", textAlign: "auto", marginBottom: 7 },
+  intro: { color: "rgba(255,255,255,0.94)", fontSize: 13, lineHeight: 24, textAlign: "auto" },
+  chips: { flexWrap: "wrap", gap: 8, marginTop: 12 }, chip: { color: "#FFFFFF", fontSize: 12, fontWeight: "700", backgroundColor: "rgba(255,255,255,0.2)", borderWidth: 1, borderColor: "rgba(255,255,255,0.32)", borderRadius: 999, paddingVertical: 4, paddingHorizontal: 12, overflow: "hidden" },
+  actions: { gap: 9, marginTop: 7, flexDirection: "row", flexWrap: "wrap" }, subjects: { backgroundColor: c.surface, borderWidth: 1, borderColor: c.border, borderRadius: 26, padding: 18, marginBottom: 22, shadowOpacity: .12, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 3 },
   sectionTitle: { fontSize: 19, lineHeight: 29, fontWeight: "700", color: c.navy, textAlign: "auto" }, subjectHelp: { color: c.muted, fontSize: 12, lineHeight: 21, textAlign: "auto", marginTop: 4 },
   subject: { width: 132, borderRadius: 16, alignItems: "center", padding: 6, minHeight: 174 }, subjectName: { fontSize: 14, fontWeight: "700", color: c.text, textAlign: "center", lineHeight: 24 }, subjectDetail: { fontSize: 11, color: c.muted, textAlign: "center", marginTop: 3 },
-  classArt: { backgroundColor: "#EDF3FF", borderRadius: 16, paddingVertical: 8, marginBottom: 5 },
+  classArt: { backgroundColor: c.tint, borderRadius: 16, paddingVertical: 8, marginBottom: 5 },
 });

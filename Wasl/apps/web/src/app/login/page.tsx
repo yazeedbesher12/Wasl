@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useApiSession, home } from '@/components/connected/session';
 import { EducationArt } from '@/components/education';
+import { Reveal } from '@/components/motion';
 import Link from 'next/link';
 export default function Login() {
   const s = useApiSession();
@@ -10,20 +11,36 @@ export default function Login() {
   const [password, setPassword] = useState('');
   return (
     <main className="demo-entry login-page">
+      <div className="login-aurora" aria-hidden="true">
+        <span className="login-blob a" />
+        <span className="login-blob b" />
+        <span className="login-blob c" />
+      </div>
       <div className="entry-composition">
-        <aside className="entry-introduction">
-          <span className="entry-wordmark">{ar ? 'وصل' : 'Wasl'}</span>
+        <Reveal className="entry-introduction">
+          <span className="entry-wordmark">
+            <span className="brand-symbol">و</span>
+            {ar ? 'وصل' : 'Wasl'}
+          </span>
           <h1>{ar ? 'تعلّم، تواصل، وتقدّم' : 'Learn, connect, grow'}</h1>
-          <EducationArt theme="entry" />
-        </aside>
-        <section className="entry-selection">
+          <p>
+            {ar
+              ? 'مساحة واحدة للمدرسة والمعلّم والطالب وولي الأمر.'
+              : 'One space for schools, teachers, students and parents.'}
+          </p>
+          <EducationArt theme="entry" className="welcome-art" />
+        </Reveal>
+        <Reveal className="entry-selection" delay={0.12}>
           <div className="language-switch">
-            <button onClick={() => s.setLocale('ar')}>عربي</button>
-            <button onClick={() => s.setLocale('en')}>English</button>
+            <button aria-pressed={ar} onClick={() => s.setLocale('ar')}>عربي</button>
+            <button aria-pressed={!ar} onClick={() => s.setLocale('en')}>English</button>
           </div>
-          <h1>{ar ? 'تسجيل الدخول' : 'Sign in'}</h1>
+          <h1>{ar ? 'أهلًا بعودتك 👋' : 'Welcome back 👋'}</h1>
+          <p className="login-subtitle">
+            {ar ? 'سجّل الدخول للمتابعة إلى مساحتك.' : 'Sign in to continue to your workspace.'}
+          </p>
           <form
-            className="panel form-panel"
+            className="panel form-panel login-card"
             onSubmit={(e) => {
               e.preventDefault();
               void s.login(email, password);
@@ -82,7 +99,7 @@ export default function Login() {
               {ar ? 'العودة لحسابي' : 'Back to my account'}
             </Link>
           )}
-        </section>
+        </Reveal>
       </div>
     </main>
   );

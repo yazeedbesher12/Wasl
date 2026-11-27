@@ -2,6 +2,8 @@ import { ApiSessionProvider } from "@/components/connected/session";
 import type { Metadata } from "next";
 import "./globals.css";
 import "./education.css";
+import "./vibrant.css";
+import { MotionRoot } from "@/components/motion";
 
 export const metadata: Metadata = {
   title: "وصل | Wasl",
@@ -15,7 +17,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ar" dir="rtl" suppressHydrationWarning>
-      <body><ApiSessionProvider>{children}</ApiSessionProvider></body>
+      <body><MotionRoot><ApiSessionProvider>{children}</ApiSessionProvider></MotionRoot></body>
     </html>
   );
 }

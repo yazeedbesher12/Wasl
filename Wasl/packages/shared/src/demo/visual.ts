@@ -1,11 +1,78 @@
 /** Presentation only. Coordinates are shared by SVG on web and native vector views. */
 export const designTokens = {
-  background: "#F0F5FF", surface: "#FFFEFC", primary: "#315DE5", tint: "#E9F0FF",
-  text: "#172D57", muted: "#61718C", border: "#DCE5F4", navy: "#10264D",
+  background: "#F4F2FF", surface: "#FFFFFF", primary: "#4F46E5", tint: "#EEF0FF",
+  text: "#1B1740", muted: "#6B6790", border: "#E4E0F7", navy: "#0B1437", navyEnd: "#1E1B4B",
   sky: "#9BD4F8", periwinkle: "#B9C6FF", yellow: "#FFD875", mint: "#A9E4D1",
-  green: "#23734A", amber: "#895615", red: "#B33838", radius: 22, controlRadius: 13,
+  green: "#047857", amber: "#B45309", red: "#DC2626", radius: 24, controlRadius: 14,
 } as const;
-export const educationMotion = { press: 180, reveal: 380, welcomeHalfCycle: 8500, backgroundHalfCycle: 10000 } as const;
+export const educationMotion = { press: 140, reveal: 420, stagger: 60, welcomeHalfCycle: 5000, backgroundHalfCycle: 7000 } as const;
+
+/** Vibrant presentation layer: gradients, role colors and status tones (platform-neutral data). */
+export const gradients = {
+  brand: ["#2F6FED", "#7C3AED", "#DB2777"],
+  sidebar: ["#0B1437", "#1E1B4B"],
+  aurora: ["#7C3AED", "#2F6FED", "#DB2777"],
+  login: ["#0B1437", "#2A1B6B", "#5B1A5E"],
+} as const;
+export type RoleThemeKey = "platform" | "school" | "teacher" | "student" | "parent";
+export type RoleTheme = { from: string; to: string; soft: string; glow: string };
+export const roleThemes: Record<RoleThemeKey, RoleTheme> = {
+  // Both stops keep white text at >= 4.5:1.
+  platform: { from: "#4F46E5", to: "#7C3AED", soft: "#EEF0FF", glow: "79,70,229" },
+  school: { from: "#2563EB", to: "#0E7490", soft: "#E0F2FE", glow: "37,99,235" },
+  teacher: { from: "#7C3AED", to: "#BE185D", soft: "#F5E8FF", glow: "124,58,237" },
+  student: { from: "#C2410C", to: "#BE185D", soft: "#FFEDE3", glow: "234,88,12" },
+  parent: { from: "#047857", to: "#0369A1", soft: "#DCFCE7", glow: "5,150,105" },
+};
+/** Accepts connected roles (SCHOOL_ADMIN) and demo roles (schoolAdmin). */
+export function roleThemeKey(role: string | null | undefined): RoleThemeKey {
+  const r = (role ?? "").toLowerCase().replace(/[^a-z]/g, "");
+  if (r.startsWith("platform")) return "platform";
+  if (r.startsWith("school")) return "school";
+  if (r.startsWith("teacher")) return "teacher";
+  if (r.startsWith("student")) return "student";
+  if (r.startsWith("parent")) return "parent";
+  return "platform";
+}
+export function roleTheme(role: string | null | undefined): RoleTheme { return roleThemes[roleThemeKey(role)]; }
+export type StatusTone = "success" | "warning" | "danger" | "info" | "neutral";
+export const statusTones: Record<StatusTone, { fg: string; bg: string }> = {
+  success: { fg: "#047857", bg: "#D1FAE5" },
+  warning: { fg: "#B45309", bg: "#FEF3C7" },
+  danger: { fg: "#DC2626", bg: "#FEE2E2" },
+  info: { fg: "#2563EB", bg: "#DBEAFE" },
+  neutral: { fg: "#5B5880", bg: "#EEECF8" },
+};
+export function toneForStatus(status: string | null | undefined): StatusTone {
+  const s = (status ?? "").toLowerCase();
+  if (/^(active|approved|published|released|graded|submitted|true|yes)$/.test(s)) return "success";
+  if (/^(pending|draft|in_progress|scheduled|unreleased)$/.test(s)) return "warning";
+  if (/^(suspended|rejected|revoked|inactive|archived|false|failed|late)$/.test(s)) return "danger";
+  if (/^(new|open|info)$/.test(s)) return "info";
+  return "neutral";
+}
+/** Rotating gradients for quick-action tiles: [from, to, shadow rgb]. */
+export const quickActionPalette: ReadonlyArray<readonly [string, string, string]> = [
+  ["#6366F1", "#8B5CF6", "99,102,241"],
+  ["#06B6D4", "#3B82F6", "6,182,212"],
+  ["#F59E0B", "#EF4444", "245,158,11"],
+  ["#10B981", "#14B8A6", "16,185,129"],
+  ["#EC4899", "#F43F5E", "236,72,153"],
+  ["#8B5CF6", "#D946EF", "139,92,246"],
+];
+/** Stable palette entry for an id/name (e.g. a child's avatar). */
+export function paletteFor(seed: string): readonly [string, string, string] {
+  let h = 0;
+  for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) | 0;
+  return quickActionPalette[Math.abs(h) % quickActionPalette.length];
+}
+export function initials(name: string): string {
+  return name.trim().split(/\s+/).slice(0, 2).map(w => w[0] ?? "").join("").toUpperCase() || "؟";
+}
+export function greetingKey(date = new Date()): "morning" | "afternoon" | "evening" {
+  const h = date.getHours();
+  return h < 12 ? "morning" : h < 18 ? "afternoon" : "evening";
+}
 export type ArtTheme = "math" | "chemistry" | "biology" | "physics" | "languages" | "computing" | "generic";
 export type WelcomeTheme = "student" | "teacher" | "school" | "parent" | "platform" | "entry";
 export type VectorShape = { type: "rect" | "ellipse" | "line" | "text"; x: number; y: number; w: number; h: number; fill?: string; stroke?: string; weight?: number; radius?: number; rotate?: number; text?: string };

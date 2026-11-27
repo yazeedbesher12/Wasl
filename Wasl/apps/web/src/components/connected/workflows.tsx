@@ -10,6 +10,7 @@ import { client, useApiSession } from './session';
 import { all, errorText } from '@/lib/connected/http';
 import { rowName, word, type Row } from '@/lib/connected/catalog';
 import type { Run } from './workspace';
+import { toneForStatus } from '@wasl/shared/demo';
 import Link from 'next/link';
 type Question = AssessmentDetailDto['questions'][number];
 type Download = (key: string) => Promise<unknown>;
@@ -156,7 +157,7 @@ export function AssessmentPanel({
     <>
       <section className="panel profile-panel">
         <h2>{a.title}</h2>
-        <span className="badge">{word(a.status, ar)}</span>
+        <span className={'badge tone-' + toneForStatus(a.status)}>{word(a.status, ar)}</span>
         <p className="long-content">{a.instructions}</p>
         <dl className="definition-list">
           <div>
@@ -230,7 +231,7 @@ export function AssessmentPanel({
                     )}
                     {option.text}
                     {role === 'TEACHER' && 'isCorrect' in option && Boolean(option.isCorrect) && (
-                      <span className="badge">{ar ? 'صحيح' : 'Correct'}</span>
+                      <span className="badge tone-success">{ar ? 'صحيح' : 'Correct'}</span>
                     )}
                   </label>
                 ))
@@ -525,7 +526,7 @@ export function SubmissionPanel({
     <section className="panel">
       <h2>{assessment?.title || (ar ? 'التسليم' : 'Submission')}</h2>
       {error && <p role="alert">{error}</p>}
-      <p className="badge">{word(sub.status, ar)}</p>
+      <p className={'badge tone-' + toneForStatus(sub.status)}>{word(sub.status, ar)}</p>
       <p dir="ltr">{sub.id}</p>
       <p>
         {sub.submittedAt

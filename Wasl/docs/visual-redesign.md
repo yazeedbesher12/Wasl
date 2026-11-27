@@ -1,8 +1,44 @@
 # Wasl educational visual system
 
 This change restyles the existing connected frontend. It adds no database, API,
-authentication, records, roles, or dependencies. Existing local demo authentication
-and role visibility remain simulated.
+authentication, records or roles. Existing local demo authentication and role
+visibility remain simulated.
+
+## Vibrant layer (current)
+
+The calm blue system was replaced by a lively one: bold gradients, a colour per role,
+glass surfaces and moderate motion. Presentation only; routes, handlers, scopes,
+storage keys and API calls are unchanged.
+
+- **Palette** (`packages/shared/src/demo/visual.ts`): `designTokens` (indigo primary
+  `#4F46E5`, lavender background `#F4F2FF`, navy `#0B1437`→`#1E1B4B` sidebar),
+  `gradients.brand` (`#2F6FED → #7C3AED → #DB2777`), `roleThemes` (platform
+  indigo→violet, school blue→teal, teacher violet→magenta, student orange→magenta,
+  parent emerald→blue), `statusTones` + `toneForStatus`, `quickActionPalette`,
+  `paletteFor`/`initials` for avatars and `greetingKey`.
+- **Contrast:** every role-gradient stop keeps white text at 4.5:1 or better. White
+  text sits only on role gradients; tables, grading and long reading stay on white.
+- **Dependencies added:** web `motion`; mobile `react-native-reanimated`,
+  `react-native-worklets`, `expo-linear-gradient`, `expo-haptics` (SDK 58 versions
+  chosen by `expo install`). `babel-preset-expo` configures the worklets plugin
+  automatically, so the app has no `babel.config.js`.
+- **Web:** `apps/web/src/app/vibrant.css` (loaded last), `components/motion.tsx`
+  (`MotionRoot` with `reducedMotion="user"`, `PageTransition` keyed by path only,
+  `Stagger`, `Reveal`, `CountUp`, `NavIndicator`), and `RoleHero`, `QuickActions` and
+  `Avatar` in `components/education.tsx`. The shell sets `data-role` so CSS role
+  variables follow the active membership.
+- **Mobile:** `src/theme.tsx` (role context, gradients, entering presets, haptics),
+  `src/shell.tsx` (gradient header, icon tab bar with a spring pill, screen
+  transition), and Reanimated press/entry motion in `src/ui.tsx` and
+  `src/education.tsx`.
+- **Motion:** 420ms reveals, 60ms stagger, spring hovers and presses, 12–17s aurora
+  drift, 5s artwork float. The OS reduced-motion setting turns all of it off; ambient
+  loops pause when the tab or app is hidden.
+- **Data honesty:** hero chips and counters show only already-loaded values, such as
+  the number of schools, classes or linked children. Nothing is invented.
+
+The sections below describe the earlier calm system; where they conflict with the
+vibrant layer, the vibrant layer wins.
 
 ## Screen and control inventory
 

@@ -1,8 +1,9 @@
 "use client";
-import { useEffect } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import Link from "next/link";
-import { navigationPath, subjectShapes, subjectTheme, welcomeShapes } from "@wasl/shared/demo";
+import { greetingKey, initials, navigationPath, paletteFor, quickActionPalette, subjectShapes, subjectTheme, welcomeShapes } from "@wasl/shared/demo";
+import { Reveal, Stagger, StaggerItem } from "./motion";
 import type { VectorShape, WelcomeTheme } from "@wasl/shared/demo";
 
 function Shape({ s }: { s: VectorShape }) {
@@ -24,7 +25,57 @@ export function EducationBackground() {
     sync(); document.addEventListener("visibilitychange", sync);
     return () => document.removeEventListener("visibilitychange", sync);
   }, []);
-  return <div className="education-background" aria-hidden="true"><svg viewBox="0 0 1300 1100" preserveAspectRatio="xMidYMin slice" fill="none"><g stroke="#4774C9" strokeWidth="2"><path className="ambient-drift" d="M-80 180C170-10 270 265 95 328S-100 530 130 614" /><path d="M1120-40c-180 230 240 180 95 400s-30 230 140 260" strokeDasharray="4 11" /><path d="M910 920c180-180 270 110 410-40M-30 930c190-100 245 50 380-60" /><circle cx="1190" cy="600" r="57" /><path className="ambient-drift alternate" d="m1040 730 34-15 34 15v46l-34-15-34 15zm34-15v46M55 770l65-100 13 9-65 100-19 13z" /><path d="M1030 95h22m-11-11v22M225 1040h18m-9-9v18" /></g></svg></div>;
+  return <div className="education-background aurora" aria-hidden="true"><span className="aurora-blob a" /><span className="aurora-blob b" /><span className="aurora-blob c" /><span className="aurora-blob d" /></div>;
+}
+const greetings = {
+  morning: { ar: "صباح الخير", en: "Good morning", icon: "☀️" },
+  afternoon: { ar: "نهارك سعيد", en: "Good afternoon", icon: "🌤️" },
+  evening: { ar: "مساء الخير", en: "Good evening", icon: "🌙" },
+} as const;
+/** Role-gradient welcome banner. Chips must carry real data only. */
+export function RoleHero({ theme, ar, name, intro, chips, children }: { theme: WelcomeTheme; ar: boolean; name: string; intro: string; chips?: ReactNode; children?: ReactNode }) {
+  const [greet, setGreet] = useState<keyof typeof greetings>("morning");
+  const [today, setToday] = useState("");
+  useEffect(() => {
+    setGreet(greetingKey());
+    setToday(new Date().toLocaleDateString(ar ? "ar" : "en", { weekday: "long", day: "numeric", month: "long" }));
+  }, [ar]);
+  const g = greetings[greet];
+  return (
+    <Reveal className="role-hero">
+      <div className="role-hero-copy">
+        <span className="role-hero-eyebrow">{ar ? g.ar : g.en} <span aria-hidden="true">{g.icon}</span></span>
+        <h2>{ar ? "أهلًا، " : "Welcome, "}{name}</h2>
+        <p>{intro}</p>
+        <div className="role-hero-chips">{chips}{today && <span className="hero-chip">{today}</span>}</div>
+        {children && <div className="actions">{children}</div>}
+      </div>
+      <EducationArt theme={theme} className="welcome-art role-hero-art" />
+    </Reveal>
+  );
+}
+export type QuickAction = { key: string; label: string; href: string; hint?: string };
+export function QuickActions({ items, ar }: { items: QuickAction[]; ar: boolean }) {
+  return (
+    <Stagger className="quick-grid">
+      {items.map((a, i) => {
+        const [from, to, glow] = quickActionPalette[i % quickActionPalette.length];
+        return (
+          <StaggerItem key={a.key} className="quick-item">
+            <Link className="quick-tile" href={a.href} style={{ "--qa-from": from, "--qa-to": to, "--qa-glow": glow } as CSSProperties}>
+              <span className="quick-icon"><NavigationIcon page={a.key} /></span>
+              <strong>{a.label}</strong>
+              <small>{a.hint ?? (ar ? "افتح القسم ←" : "Open section →")}</small>
+            </Link>
+          </StaggerItem>
+        );
+      })}
+    </Stagger>
+  );
+}
+export function Avatar({ name, seed }: { name: string; seed: string }) {
+  const [from, to] = paletteFor(seed);
+  return <span className="gradient-avatar" aria-hidden="true" style={{ "--av-from": from, "--av-to": to } as CSSProperties}>{initials(name)}</span>;
 }
 export function Welcome({ name, title, intro, theme, children }: { name?: string; title: string; intro: string; theme: WelcomeTheme; children?: ReactNode }) {
   return <section className={`education-welcome welcome-${theme}`}><div className="welcome-copy"><span className="welcome-eyebrow">{title}</span><h1>{name || title}</h1><p>{intro}</p>{children && <div className="actions">{children}</div>}</div><EducationArt theme={theme} className="welcome-art" /></section>;

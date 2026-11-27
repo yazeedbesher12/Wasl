@@ -9,7 +9,32 @@ import { all, api, errorText } from '@/lib/connected/http';
 import { client, home, useApiSession } from './session';
 import { ApiRecordForm } from './record-form';
 import { AssessmentPanel, SubmissionPanel } from './workflows';
-import { EducationArt, EducationBackground, NavigationIcon } from '../education';
+import { Avatar, EducationArt, EducationBackground, NavigationIcon, QuickActions, RoleHero, SubjectStrip } from '../education';
+import { CountUp, NavIndicator, PageTransition, Stagger, StaggerItem } from '../motion';
+import { navigationGroup, roleThemeKey, toneForStatus } from '@wasl/shared/demo';
+import type { WelcomeTheme } from '@wasl/shared/demo';
+
+const heroTheme: Record<string, WelcomeTheme> = {
+  admin: 'platform',
+  school: 'school',
+  teacher: 'teacher',
+  student: 'student',
+  parent: 'parent',
+};
+const heroIntro: Record<string, [string, string]> = {
+  admin: ['تابع المدارس المتصلة وأدِر المنصة من مكان واحد.', 'Follow connected schools and manage the platform in one place.'],
+  school: ['أدِر الأعضاء والصفوف والسنة الدراسية بسهولة.', 'Manage members, classes and the academic year with ease.'],
+  teacher: ['صفوفك ودروسك وتقييماتك جاهزة بانتظارك.', 'Your classes, lessons and assessments are ready for you.'],
+  student: ['مهامك ودروسك بانتظارك. يلا نبدأ!', 'Your tasks and lessons are waiting. Let’s get going!'],
+  parent: ['تابع تعلّم أبنائك ونتائجهم المنشورة.', 'Follow your children’s learning and released results.'],
+};
+const groupLabel: Record<string, [string, string]> = {
+  navWorkspace: ['الرئيسية', 'Workspace'],
+  navLearning: ['التعلّم', 'Learning'],
+  navManage: ['الإدارة', 'Manage'],
+  navAccount: ['الحساب', 'Account'],
+};
+const statusColumns = new Set(['status', 'active']);
 
 export type Run = <T>(work: () => Promise<T>, done?: (value: T) => void) => Promise<T | undefined>;
 const expected: Record<string, Role> = {
@@ -385,6 +410,11 @@ function ConnectedScreen({ role, path }: { role: string; path: string[] }) {
   const selectedName = children.find((c) => c.student.id === child)?.student.fullName;
   const value = (row: Row, column: string): ReactNode => {
     const raw = row[column];
+    if (statusColumns.has(column) && raw !== null && raw !== undefined && raw !== '') {
+      const label =
+        typeof raw === 'boolean' ? (raw ? (ar ? 'نعم' : 'Yes') : ar ? 'لا' : 'No') : word(String(raw), ar);
+      return <span className={'badge tone-' + toneForStatus(String(raw))}>{label}</span>;
+    }
     if (typeof raw === 'boolean') return raw ? (ar ? 'نعم' : 'Yes') : ar ? 'لا' : 'No';
     if (raw === null || raw === undefined || raw === '') return '—';
     const sources: Record<string, string> = {
@@ -447,13 +477,7 @@ function ConnectedScreen({ role, path }: { role: string; path: string[] }) {
       return <Profile run={run} busy={busy} dirty={() => setDirty(true)} />;
     if (page === 'academics')
       return (
-        <div className="learning-cards">
-          {academics.map((k) => (
-            <Link className="panel learning-card" href={href(k)} key={k}>
-              <h2>{word(k, ar)}</h2>
-            </Link>
-          ))}
-        </div>
+        <QuickActions ar={ar} items={academics.map((k) => ({ key: k, label: word(k, ar), href: href(k) }))} />
       );
     if (role === 'parent' && !child && !['children', 'notifications'].includes(page))
       return (
@@ -467,54 +491,91 @@ function ConnectedScreen({ role, path }: { role: string; path: string[] }) {
     if (page === 'dashboard')
       return (
         <>
-          <section className="panel">
-            <EducationArt theme="entry" />
-            <h2>
-              {ar ? 'أهلًا، ' : 'Welcome, '}
-              {s.user.fullName}
-            </h2>
-            <p>
-              {ar
-                ? 'تابع نشاطك الدراسي من الأقسام التالية.'
-                : 'Follow your learning activity using the sections below.'}
-            </p>
-          </section>
-          <div className="learning-cards">
-            {roleNav[s.user.activeRole!]
+          <RoleHero
+            theme={heroTheme[role] ?? 'entry'}
+            ar={ar}
+            name={s.user.fullName}
+            intro={(heroIntro[role] ?? heroIntro.student)[ar ? 0 : 1]}
+            chips={
+              <>
+                <span className="hero-chip">{word(s.user.activeRole ?? '', ar)}</span>
+                <span className="hero-chip">
+                  <CountUp value={total} />{' '}
+                  {role === 'admin' ? word('schools', ar) : word('classes', ar)}
+                </span>
+              </>
+            }
+          />
+          <h2 className="section-title">{ar ? 'وصول سريع' : 'Quick access'}</h2>
+          <QuickActions
+            ar={ar}
+            items={roleNav[s.user.activeRole!]
               .filter((k) => !['dashboard', 'profile'].includes(k))
-              .map((k) => (
-                <Link key={k} href={href(k)} className="panel learning-card">
-                  <NavigationIcon page={k} />
-                  <h2>{word(k, ar)}</h2>
-                </Link>
-              ))}
-          </div>
+              .map((k) => ({ key: k, label: word(k, ar), href: href(k) }))}
+          />
+          {role !== 'admin' && (
+            <SubjectStrip
+              title={word('classes', ar)}
+              intro={ar ? 'صفوفك الحالية حسب المادة.' : 'Your current classes by subject.'}
+              rows={rows.flatMap((r) => {
+                const c = r.classInfo as ClassDto | undefined;
+                if (!c) return [];
+                return [
+                  {
+                    id: String(r.id),
+                    name: ar ? c.subject.nameAr || c.subject.nameEn : c.subject.nameEn || c.subject.nameAr,
+                    subject: `${c.subject.nameEn} ${c.subject.nameAr}`,
+                    detail: c.section.name,
+                    href: href('classes'),
+                  },
+                ];
+              })}
+            />
+          )}
         </>
       );
     if (page === 'children')
       return (
-        <div className="learning-cards">
-          {children.map((c) => (
-            <article className="panel learning-card" key={c.link.id}>
-              <EducationArt subject="" />
-              <h2>{c.student.fullName}</h2>
-              <p>{ar ? c.school.nameAr || c.school.name : c.school.name}</p>
-              <Link
-                className="button"
-                href={`/parent/classes?child=${c.student.id}&school=${c.school.id}`}
-              >
-                {ar ? 'عرض التعلم' : 'View learning'}
-              </Link>
-            </article>
-          ))}
+        <>
+          <RoleHero
+            theme="parent"
+            ar={ar}
+            name={s.user.fullName}
+            intro={heroIntro.parent[ar ? 0 : 1]}
+            chips={
+              <span className="hero-chip">
+                <CountUp value={children.length} /> {word('children', ar)}
+              </span>
+            }
+          />
+          <Stagger className="learning-cards">
+            {children.map((c) => (
+              <StaggerItem key={c.link.id} className="child-card-wrap">
+                <article className="panel learning-card child-card">
+                  <Avatar name={c.student.fullName} seed={c.student.id} />
+                  <h2>{c.student.fullName}</h2>
+                  <p className="muted">{ar ? c.school.nameAr || c.school.name : c.school.name}</p>
+                  <Link
+                    className="button"
+                    href={`/parent/classes?child=${c.student.id}&school=${c.school.id}`}
+                  >
+                    {ar ? 'عرض التعلم' : 'View learning'}
+                  </Link>
+                </article>
+              </StaggerItem>
+            ))}
+          </Stagger>
           {!children.length && (
-            <p>
-              {ar
-                ? 'لا يوجد أطفال مرتبطون ومصرّح لهم حاليًا.'
-                : 'There are no currently approved child links.'}
-            </p>
+            <section className="panel empty">
+              <EducationArt subject="" className="empty-art" />
+              <p>
+                {ar
+                  ? 'لا يوجد أطفال مرتبطون ومصرّح لهم حاليًا.'
+                  : 'There are no currently approved child links.'}
+              </p>
+            </section>
           )}
-        </div>
+        </>
       );
     if (editing && definition) {
       if (!definition[rowId() ? 'edit' : 'create']?.includes(s.user.activeRole!))
@@ -625,7 +686,7 @@ function ConnectedScreen({ role, path }: { role: string; path: string[] }) {
             : (definition?.columns ?? ['title']);
     return (
       <>
-        <div className="toolbar panel">
+        <div className="toolbar panel glass">
           <label>
             {ar ? 'بحث' : 'Search'}
             <input
@@ -672,7 +733,7 @@ function ConnectedScreen({ role, path }: { role: string; path: string[] }) {
         </div>
         {!rows.length ? (
           <section className="panel empty">
-            <EducationArt subject="" />
+            <EducationArt subject="" className="empty-art" />
             <h2>{ar ? 'لا توجد سجلات لعرضها' : 'No records to display'}</h2>
           </section>
         ) : (
@@ -698,8 +759,8 @@ function ConnectedScreen({ role, path }: { role: string; path: string[] }) {
                         .toLowerCase()
                         .includes(query.toLowerCase()),
                   )
-                  .map((r) => (
-                    <tr key={r.id}>
+                  .map((r, i) => (
+                    <tr key={r.id} className="row-reveal" style={{ animationDelay: `${Math.min(i, 12) * 40}ms` }}>
                       {columns.map((c) => (
                         <td key={c}>{value(r, c)}</td>
                       ))}
@@ -852,6 +913,7 @@ function ConnectedScreen({ role, path }: { role: string; path: string[] }) {
   return (
     <div
       className="admin-shell connected-workspace"
+      data-role={roleThemeKey(s.user?.activeRole ?? expected[role])}
       onClickCapture={(e) => {
         const a = e.target instanceof Element ? e.target.closest('a') : null;
         if (a?.getAttribute('href')?.startsWith('/') && !e.metaKey && !e.ctrlKey && !safeLeave()) {
@@ -868,27 +930,50 @@ function ConnectedScreen({ role, path }: { role: string; path: string[] }) {
           <span className="brand-symbol">و</span>
           <span>{ar ? 'وصل' : 'Wasl'}</span>
         </Link>
-        <div className="sidebar-workspace">{word(s.user?.activeRole ?? '', ar)}</div>
+        <div className="sidebar-workspace">
+          <span className="workspace-status-dot" />
+          {word(s.user?.activeRole ?? '', ar)}
+        </div>
         <nav>
           {s.user?.activeRole &&
-            roleNav[s.user.activeRole].map((p) => (
-              <Link
-                className={'nav-link ' + (page === p ? 'selected' : '')}
-                key={p}
-                href={href(p)}
-                aria-current={page === p ? 'page' : undefined}
-              >
-                <NavigationIcon page={p} />
-                {word(p, ar)}
-              </Link>
-            ))}
+            roleNav[s.user.activeRole].map((p, i, list) => {
+              const group = navigationGroup(p);
+              const selected = page === p || (p === 'academics' && academics.includes(page));
+              return (
+                <div key={p}>
+                  {(i === 0 || navigationGroup(list[i - 1]) !== group) && (
+                    <div className="nav-label">{(groupLabel[group] ?? groupLabel.navWorkspace)[ar ? 0 : 1]}</div>
+                  )}
+                  <Link
+                    className={'nav-link ' + (selected ? 'selected' : '')}
+                    href={href(p)}
+                    aria-current={page === p ? 'page' : undefined}
+                  >
+                    {selected && <NavIndicator />}
+                    <NavigationIcon page={p} />
+                    <span>{word(p, ar)}</span>
+                  </Link>
+                </div>
+              );
+            })}
         </nav>
+        {s.user && (
+          <div className="sidebar-identity">
+            <Avatar name={s.user.fullName} seed={s.user.id} />
+            <div>
+              <strong>{s.user.fullName}</strong>
+              <small>{word(s.user.activeRole ?? '', ar)}</small>
+            </div>
+          </div>
+        )}
       </aside>
       <main className="admin-main" id="workspace-main">
         <EducationBackground />
         <header className="topbar">
-          <strong>{s.user?.fullName}</strong>
-          <div className="actions">
+          <div className="topbar-start">
+            <strong>{s.user?.fullName}</strong>
+          </div>
+          <div className="actions topbar-end">
             {s.user?.activeRole && (
               <label className="live-mobile-nav">
                 {ar ? 'انتقل إلى' : 'Navigate'}
@@ -940,6 +1025,7 @@ function ConnectedScreen({ role, path }: { role: string; path: string[] }) {
             </select>
             <div className="language-switch">
               <button
+                aria-pressed={ar}
                 onClick={() => {
                   if (safeLeave()) s.setLocale('ar');
                 }}
@@ -947,6 +1033,7 @@ function ConnectedScreen({ role, path }: { role: string; path: string[] }) {
                 عربي
               </button>
               <button
+                aria-pressed={!ar}
                 onClick={() => {
                   if (safeLeave()) s.setLocale('en');
                 }}
@@ -1023,7 +1110,7 @@ function ConnectedScreen({ role, path }: { role: string; path: string[] }) {
               {notice}
             </p>
           )}
-          {content()}
+          <PageTransition routeKey={pathname}>{content()}</PageTransition>
         </div>
       </main>
     </div>
